@@ -1,0 +1,49 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "classConfig": {
+      ".read": true,
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false"
+    },
+    "groups": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false"
+    },
+    "students": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false"
+    },
+    "users": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
+      "$uid": {
+        ".read": "auth != null && (auth.uid == $uid || (root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false))",
+        ".write": "auth != null && ((root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false) || (!data.exists() && !root.child('classConfig').exists() && !root.child('users').exists() && auth.uid == $uid && newData.child('username').val() == 'GVCN' && newData.child('role').val() == 'gvcn' && newData.child('active').val() == true))"
+      }
+    },
+    "records": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+      "$rid": {
+        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || ((root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho') && ((data.exists() && data.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val()) || (!data.exists() && newData.exists() && newData.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val())) && (!newData.exists() || newData.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val())))"
+      }
+    },
+    "weeks": {
+      "$week": {
+        ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false"
+      }
+    },
+    "audit": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
+      "$aid": {
+        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && ((root.child('users').child(auth.uid).child('role').val() == 'gvcn') || (!data.exists() && (root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho')))"
+      }
+    },
+    "reports": {
+      "$rid": {
+        ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
+        ".write": "auth != null && ((!data.exists() && newData.child('status').val() == 'new') || (root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false))"
+      }
+    }
+  }
+}
