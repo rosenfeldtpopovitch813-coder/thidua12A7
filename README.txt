@@ -9,7 +9,7 @@ styles.css
 vercel.json
 firebase-rules.json
 
-Firebase config đã gắn trong scripts.js. Người dùng chỉ nhập tên tài khoản + mật khẩu; email kỹ thuật chỉ tồn tại phía sau Firebase Authentication.
+Firebase config nằm trong firebase-config.js. Người dùng chỉ nhập tên tài khoản + mật khẩu; định danh kỹ thuật của Firebase Authentication không hiển thị hoặc yêu cầu từ người dùng.
 
 Kiểm tra trước deploy:
 - JavaScript syntax OK
@@ -18,4 +18,6 @@ Kiểm tra trước deploy:
 - Cache-busting/no-store cho index, JS, CSS
 
 
-STUDENT IMPORT FIX: no 24-student limit; robust Excel/CSV/semicolon/pipe parsing; duplicate IDs are retained with unique suffixes; Firebase student count verified after save.
+STUDENT IMPORT: không có giới hạn 24 học sinh; hỗ trợ Excel/CSV/chấm phẩy/dấu |; mã thiếu được tạo ổn định theo tên và tổ; mã trùng được cảnh báo và có hậu tố riêng; số học sinh được xác minh lại từ Firebase sau khi lưu.
+
+Security Rules: chỉ tài khoản đang hoạt động mới thao tác; cán bộ chỉ sửa/xóa bản ghi do mình tạo (GVCN có ngoại lệ); tuần đã chốt từ chối thay đổi của cán bộ; audit là append-only; phản ánh phải có dữ liệu hợp lệ.

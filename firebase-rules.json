@@ -24,7 +24,8 @@
     "records": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
       "$rid": {
-        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || ((root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho') && ((data.exists() && data.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val()) || (!data.exists() && newData.exists() && newData.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val())) && (!newData.exists() || newData.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val())))"
+        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || ((root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho') && ((!data.exists() && newData.child('createdByUid').val() == auth.uid) || (data.exists() && data.child('createdByUid').val() == auth.uid && (!newData.exists() || newData.child('createdByUid').val() == auth.uid))) && ((newData.exists() && root.child('weeks').child(newData.child('week').val()).child('finalized').val() != true) || (!newData.exists() && root.child('weeks').child(data.child('week').val()).child('finalized').val() != true))) || ((root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho') && ((!data.exists() && newData.child('createdByUid').val() == auth.uid && newData.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val()) || (data.exists() && data.child('createdByUid').val() == auth.uid && (!newData.exists() || (newData.child('createdByUid').val() == auth.uid && newData.child('studentGroup').val() == root.child('users').child(auth.uid).child('group').val())))) && ((newData.exists() && root.child('weeks').child(newData.child('week').val()).child('finalized').val() != true) || (!newData.exists() && root.child('weeks').child(data.child('week').val()).child('finalized').val() != true))))",
+        ".validate": "!newData.exists() || (newData.hasChildren(['id','week','studentId','studentGroup','type','points','createdByUid','createdAt']) && newData.child('id').val() == $rid && root.child('students').child(newData.child('studentId').val()).exists() && (newData.child('type').val() == 'plus' || newData.child('type').val() == 'minus') && newData.child('points').isNumber())"
       }
     },
     "weeks": {
@@ -36,13 +37,15 @@
     "audit": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
       "$aid": {
-        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && ((root.child('users').child(auth.uid).child('role').val() == 'gvcn') || (!data.exists() && (root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho')))"
+        ".write": "auth != null && !data.exists() && newData.exists() && root.child('users').child(auth.uid).child('active').val() != false && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || ((root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho') && newData.child('actorUid').val() == auth.uid)) && newData.child('id').val() == $aid",
+        ".validate": "newData.hasChildren(['id','action','actorUid','at']) && newData.child('at').isNumber()"
       }
     },
     "reports": {
       "$rid": {
         ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
-        ".write": "auth != null && ((!data.exists() && newData.child('status').val() == 'new') || (root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false))"
+        ".write": "auth != null && ((!data.exists() && newData.child('status').val() == 'new') || (root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false))",
+        ".validate": "newData.hasChildren(['id','content','createdAt','status']) && newData.child('id').val() == $rid && newData.child('content').isString() && newData.child('content').val().length >= 8 && newData.child('content').val().length <= 1000 && newData.child('createdAt').isNumber()"
       }
     }
   }
