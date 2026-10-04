@@ -29,6 +29,7 @@
       }
     },
     "weeks": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
       "$week": {
         ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
         ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false"
@@ -42,6 +43,7 @@
       }
     },
     "reports": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
       "$rid": {
         ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
         ".write": "auth != null && ((!data.exists() && newData.child('status').val() == 'new') || (root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false))",
