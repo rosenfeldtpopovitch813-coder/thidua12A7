@@ -36,3 +36,16 @@ SỬA LỖI PHÂN QUYỀN (Firebase Rules):
   • reports: chỉ GVCN được đọc danh sách
 - Sau khi deploy code, BẮT BUỘC mở Firebase Console → Realtime Database → Rules
   → dán nội dung firebase-rules.json → Publish.
+
+
+CẬP NHẬT (chấm chéo giữa các tổ):
+- GVCN vào tab Thiết lập → thẻ "Chấm chéo giữa các tổ" → chọn chế độ → "Lưu chế độ chấm".
+  • Tắt (mặc định): tổ nào chấm tổ đó như cũ.
+  • Chấm chéo: tổ trưởng/tổ phó chỉ ghi điểm cho học sinh các tổ KHÁC, không chấm tổ mình.
+  • Chấm tự do: tổ trưởng/tổ phó ghi điểm được cho mọi tổ.
+- Lớp trưởng, lớp phó, GVCN vẫn chấm toàn lớp. Bản ghi cũ không bị thay đổi.
+- Cấu hình lưu ở classConfig/crossGrading ("off" | "others" | "all").
+- Firebase Rules đã cập nhật để chặn ở phía máy chủ (kể cả khi sửa mã trên trình duyệt), và kiểm tra
+  studentGroup của bản ghi phải khớp với tổ thật của học sinh.
+- BẮT BUỘC sau khi deploy: Firebase Console → Realtime Database → Rules → dán lại nội dung
+  firebase-rules.json → Publish. Nếu quên, chế độ chấm chéo sẽ bị Rules cũ từ chối khi lưu bản ghi.
