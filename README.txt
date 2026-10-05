@@ -38,14 +38,14 @@ SỬA LỖI PHÂN QUYỀN (Firebase Rules):
   → dán nội dung firebase-rules.json → Publish.
 
 
-CẬP NHẬT (chấm chéo giữa các tổ):
-- GVCN vào tab Quản lý (kéo lên đầu trang) → thẻ "Chấm chéo giữa các tổ" → chọn chế độ → "Lưu chế độ chấm".
-  • Tắt (mặc định): tổ nào chấm tổ đó như cũ.
-  • Chấm chéo: tổ trưởng/tổ phó chỉ ghi điểm cho học sinh các tổ KHÁC, không chấm tổ mình.
-  • Chấm tự do: tổ trưởng/tổ phó ghi điểm được cho mọi tổ.
-- Lớp trưởng, lớp phó, GVCN vẫn chấm toàn lớp. Bản ghi cũ không bị thay đổi.
-- Cấu hình lưu ở classConfig/crossGrading ("off" | "others" | "all").
-- Firebase Rules đã cập nhật để chặn ở phía máy chủ (kể cả khi sửa mã trên trình duyệt), và kiểm tra
-  studentGroup của bản ghi phải khớp với tổ thật của học sinh.
-- BẮT BUỘC sau khi deploy: Firebase Console → Realtime Database → Rules → dán lại nội dung
-  firebase-rules.json → Publish. Nếu quên, chế độ chấm chéo sẽ bị Rules cũ từ chối khi lưu bản ghi.
+CẬP NHẬT (chấm chéo giữa các tổ – GVCN chỉ định):
+- GVCN vào tab Quản lý (đầu trang) → thẻ "Chấm chéo giữa các tổ":
+  • Trạng thái: Tắt / Bật.
+  • Với mỗi tổ, chọn tổ sẽ chấm (1 trong các tổ còn lại) hoặc "Tổ mình (không đổi)".
+  • Nút "Gợi ý xoay vòng": 1→2→3→…→1 rồi chỉnh tay nếu cần.
+  • Bấm "Lưu phân công chấm". Hệ thống cảnh báo nếu có tổ chưa ai chấm hoặc bị nhiều tổ cùng chấm.
+- Khi bật, tổ trưởng/tổ phó chỉ ghi điểm cho học sinh của tổ được chỉ định (không chấm tổ mình).
+- Lớp trưởng, lớp phó, GVCN vẫn chấm toàn lớp. Bản ghi cũ không đổi.
+- Dữ liệu: classConfig/crossGrading ("off"|"assigned") và classConfig/crossTargets {"1":"2",...}.
+- Firebase Rules đã cập nhật để chặn ở phía máy chủ. BẮT BUỘC sau khi deploy: Firebase Console →
+  Realtime Database → Rules → dán lại firebase-rules.json → Publish.
