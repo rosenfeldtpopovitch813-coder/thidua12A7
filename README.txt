@@ -39,7 +39,7 @@ SỬA LỖI PHÂN QUYỀN (Firebase Rules):
 
 
 CẬP NHẬT (chấm chéo giữa các tổ):
-- GVCN vào tab Thiết lập → thẻ "Chấm chéo giữa các tổ" → chọn chế độ → "Lưu chế độ chấm".
+- GVCN vào tab Quản lý (kéo lên đầu trang) → thẻ "Chấm chéo giữa các tổ" → chọn chế độ → "Lưu chế độ chấm".
   • Tắt (mặc định): tổ nào chấm tổ đó như cũ.
   • Chấm chéo: tổ trưởng/tổ phó chỉ ghi điểm cho học sinh các tổ KHÁC, không chấm tổ mình.
   • Chấm tự do: tổ trưởng/tổ phó ghi điểm được cho mọi tổ.
