@@ -47,7 +47,17 @@ function grade(x){return x>=90?["Tốt","good"]:x>=80?["Khá","ok"]:x>=65?["Đ�
 function calc(studentId){const rs=Object.values(state.records).filter(r=>r.week===state.week&&r.studentId===studentId&&r.status!=="rejected"&&r.status!=="pending"&&r.status!=="deleted");const plus=rs.filter(r=>r.type==="plus").reduce((a,r)=>a+Number(r.points||0),0),minus=rs.filter(r=>r.type==="minus").reduce((a,r)=>a+Math.abs(Number(r.points||0)),0),pending=Object.values(state.records).filter(r=>r.week===state.week&&r.studentId===studentId&&r.status==="pending").length;return{plus,minus,pending,score:Math.min(100,100+plus-minus)}}
 function rows(){return Object.values(state.students).filter(s=>s.active!==false).map(s=>({st:s,...calc(s.id)})).sort((a,b)=>b.score-a.score||b.plus-a.plus||String(a.st.id??"").localeCompare(String(b.st.id??""),"vi",{numeric:true})||a.st.name.localeCompare(b.st.name,"vi"))}
 function visibleRows(){return rows().filter(r=>(state.group==="all"||String(r.st.group)===String(state.group))&&(!state.search||(`${r.st.id} ${r.st.name}`).toLowerCase().includes(state.search.toLowerCase())))}
-function groupList(){return Object.values(state.groups||{}).filter(Boolean).sort((a,b)=>Number(a.id)-Number(b.id))}
+function groupList(){
+  const map=new Map();
+  Object.values(state.groups||{}).filter(Boolean).forEach(g=>{
+    if(g?.id!=null&&String(g.id)!=="") map.set(String(g.id),{...g,id:String(g.id)});
+  });
+  Object.values(state.students||{}).filter(s=>s&&s.active!==false&&s.group!=null&&String(s.group)!=="").forEach(st=>{
+    const id=String(st.group);
+    if(!map.has(id)) map.set(id,{id,name:id});
+  });
+  return [...map.values()].sort((a,b)=>String(a.id).localeCompare(String(b.id),"vi",{numeric:true}));
+}
 function compareStudentsByGroup(a,b){const groupNumber=value=>{const match=String(value??"").match(/\d+/);return match?Number(match[0]):Number.MAX_SAFE_INTEGER};return groupNumber(a.group)-groupNumber(b.group)||String(a.group??"").localeCompare(String(b.group??""),"vi",{numeric:true})||String(a.id??"").localeCompare(String(b.id??""),"vi",{numeric:true})||String(a.name??"").localeCompare(String(b.name??""),"vi")}
 function accountEmail(username){return `${slug(username)}@auth.${slug(state.config?.classKey||state.config?.className||"thi-dua")}.app`}
 function classKey(){return slug(state.config?.classKey||state.config?.className||state.setup?.classKey||"thi-dua")||"thi-dua"}
@@ -170,7 +180,7 @@ async function deleteRecord(rid){const r=state.records[rid];if(!r||!canDeleteRec
 function studentsPage(){const list=Object.values(state.students).sort(compareStudentsByGroup);return `<h2 class="page-title">Học sinh</h2><p class="page-sub">Danh sách lớp dùng đúng thứ tự: <strong>Mã học sinh · Họ và tên · Tổ</strong>; bảng được sắp theo tổ, rồi theo mã học sinh.</p>${isGvcn()?`<div class="actions no-print"><button class="btn blue" data-action="edit-roster">✎ Sửa danh sách</button><button class="btn light" data-action="csv-students">Xuất danh sách</button></div>`:""}<div class="card" style="margin-top:12px"><div class="tablewrap"><table class="table"><thead><tr><th>Mã học sinh</th><th>Họ và tên</th><th>Tổ</th><th>Trạng thái</th></tr></thead><tbody>${list.length?list.map(s=>`<tr><td>${esc(s.id)}</td><td style="font-weight:900">${esc(s.name)}</td><td>Tổ ${esc(s.group)}</td><td><span class="statusbadge ${s.active===false?"off":"on"}">${s.active===false?"Đã ẩn":"Đang học"}</span></td></tr>`).join(""):"<tr><td colspan='4' class='empty'>Chưa có học sinh.</td></tr>"}</tbody></table></div></div>`}
 function rulesPage(){return `<h2 class="page-title">Quy chế thi đua</h2><p class="page-sub">Hiển thị trực tiếp thang điểm của lớp ${esc(state.config?.className||"")}.</p><div class="grid"><div class="card"><div class="cardhead"><div class="title">Điểm trừ</div></div><div class="pad">${RULES_MINUS.map(x=>`<div class="item" style="margin-bottom:7px"><div class="itemrow"><div class="grow">${esc(x[0])}</div><strong style="color:#be123c">${x[1]===null?"−5 đến −10":x[1]}</strong></div></div>`).join("")}</div></div><div class="card"><div class="cardhead"><div class="title">Điểm cộng</div></div><div class="pad">${RULES_PLUS.map(x=>`<div class="item" style="margin-bottom:7px"><div class="itemrow"><div class="grow">${esc(x[0])}</div><strong style="color:#047857">+${x[1]}</strong></div></div>`).join("")}<div class="sectionline"></div><div class="success">Điểm cộng tối đa: +10 điểm/tuần.</div><div class="notice" style="margin-top:8px">Điểm cuối tuần = 100 + điểm cộng − điểm trừ; tối đa 100 điểm.</div><div class="warning" style="margin-top:8px">Học sinh ốm/điều trị/nằm viện có phép và căn cứ phù hợp thì không trừ. Được GV cho phép dùng điện thoại phục vụ học tập thì không tính vi phạm.</div></div></div></div>`}
 function reportsPage(){const rs=Object.values(state.reports).sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));return `<h2 class="page-title">Phản ánh ẩn danh</h2><p class="page-sub">Chỉ GVCN xem được hộp thư này. Người gửi không cần tài khoản.</p><div class="card"><div class="pad"><div class="recordlist">${rs.length?rs.map(r=>`<div class="record ${r.status==='new'?"pending":""}"><div class="recrow"><div class="recicon" style="background:#ede9fe;color:#6d28d9">📣</div><div class="grow"><div class="fw">${esc(r.category||"Phản ánh")}</div><div class="recmeta">${r.target?`Đối tượng: ${esc(r.target)}<br>`:""}${esc(r.content)}<br>${new Date(Number(r.createdAt||Date.now())).toLocaleString("vi-VN")} • ${r.status==='new'?"Mới":"Đã xử lý"}</div></div></div>${r.status==='new'?`<div class="recactions no-print"><button class="btn small green" data-action="handle-report:${r.id}">✓ Đã xử lý</button><button class="btn small light" data-action="report-record:${r.id}">Tạo ghi nhận</button></div>`:""}</div>`).join(""):"<div class='empty'>Chưa có phản ánh.</div>"}</div></div></div>`}
-function accountForm(uid){const existing=uid?state.users[uid]:null;if(uid&&!existing)return;const roles=["gvcn","lopTruong","lopPho","toTruong","toPho","student"];const roleOptions=roles.map(r=>`<option value="${esc(r)}" ${existing?.role===r?"selected":""}>${esc(roleLabel(r))}</option>`).join("");const groupOptions=`<option value="">-- Không --</option>${groupList().map(g=>`<option value="${esc(g.id)}" ${String(existing?.group||"")===String(g.id)?"selected":""}>Tổ ${esc(g.name||g.id)}</option>`).join("")}`;const pass=existing?"":`<label class="field fullcol"><span class="label">Mật khẩu ban đầu</span><input id="ac-pass" class="input" type="password" minlength="6" required></label>`;openModal(existing?"Sửa tài khoản":"Tạo tài khoản",`<form id="account-form"><div class="formgrid"><label class="field"><span class="label">Tên đăng nhập</span><input id="ac-user" class="input" value="${esc(existing?.username||"")}" ${existing?"readonly":""} required></label><label class="field"><span class="label">Họ tên</span><input id="ac-name" class="input" value="${esc(existing?.name||"")}" required></label><label class="field"><span class="label">Vai trò</span><select id="ac-role" class="select">${roleOptions}</select></label><label class="field"><span class="label">Tổ</span><select id="ac-group" class="select">${groupOptions}</select></label>${pass}</div><div class="warning" style="margin-top:10px">Không nhập email. Hệ thống vẫn dùng tên đăng nhập ở giao diện.</div><div class="actions" style="justify-content:flex-end"><button class="btn light" type="button" data-action="close">Hủy</button><button class="btn dark" type="submit">${existing?"Lưu thay đổi":"Tạo tài khoản"}</button></div></form>`);$('#account-form').onsubmit=async e=>{e.preventDefault();const username=$('#ac-user').value.trim().toUpperCase().replace(/\s+/g,"");const name=$('#ac-name').value.trim(),role=$('#ac-role').value,group=$('#ac-group').value||null;if(!username||!name)return toast("Thiếu tên đăng nhập hoặc họ tên.","err");if(["toTruong","toPho"].includes(role)&&!group)return toast("Tổ trưởng/tổ phó phải có tổ.","err");if(existing){const before={...existing},next={...existing,name,role,group};if(!(await dbSet(`users/${uid}`,next)))return toast(firebaseErrMsg("Không cập nhật được tài khoản."),"err");const verify=await dbGet(`users/${uid}`);if(!verify.exists())return toast("Không xác minh được sau khi lưu.","err");state.users[uid]=verify.val();await writeSystemAudit("UPDATE","user",uid,before,state.users[uid]);closeModal();renderApp();toast("Đã cập nhật tài khoản.","ok");return}if(Object.values(state.users).some(u=>String(u.username||"").toUpperCase()===username))return toast("Tên đăng nhập đã tồn tại.","err");const password=$('#ac-pass').value;if(password.length<6)return toast("Mật khẩu tối thiểu 6 ký tự.","err");try{const made=await createAuthUser(username,password);const profile={username,name,role,group,active:true,createdAt:Date.now()};if(!(await dbSet(`users/${made.uid}`,profile)))throw new Error("profile-write-failed");try{await fb.appApi.deleteApp(made.app)}catch{}state.users[made.uid]={...profile,uid:made.uid};await writeSystemAudit("CREATE","user",made.uid,null,state.users[made.uid]);closeModal();renderApp();toast("Đã tạo tài khoản.","ok")}catch(e){console.error(e);toast(e?.code==="auth/email-already-in-use"?"Tên đăng nhập đã tồn tại.":"Tạo tài khoản thất bại.","err")}}}
+function accountForm(uid){const existing=uid?state.users[uid]:null;if(uid&&!existing)return;const roles=["gvcn","lopTruong","lopPho","toTruong","toPho","student"];const roleOptions=roles.map(r=>`<option value="${esc(r)}" ${existing?.role===r?"selected":""}>${esc(roleLabel(r))}</option>`).join("");const groupOptions=`<option value="">-- Không --</option>${groupList().map(g=>`<option value="${esc(g.id)}" ${String(existing?.group||"")===String(g.id)?"selected":""}>Tổ ${esc(g.name||g.id)}</option>`).join("")}`;const pass=existing?"":`<label class="field fullcol"><span class="label">Mật khẩu ban đầu</span><input id="ac-pass" class="input" type="password" minlength="6" required></label>`;openModal(existing?"Sửa tài khoản":"Tạo tài khoản",`<form id="account-form"><div class="formgrid"><label class="field"><span class="label">Tên đăng nhập</span><input id="ac-user" class="input" value="${esc(existing?.username||"")}" ${existing?"readonly":""} required></label><label class="field"><span class="label">Họ tên</span><input id="ac-name" class="input" value="${esc(existing?.name||"")}" required></label><label class="field"><span class="label">Vai trò</span><select id="ac-role" class="select">${roleOptions}</select></label><label class="field"><span class="label">Tổ</span><select id="ac-group" class="select">${groupOptions}</select></label>${pass}</div><div class="warning" style="margin-top:10px">Không nhập email. Hệ thống vẫn dùng tên đăng nhập ở giao diện.</div><div class="actions" style="justify-content:flex-end"><button class="btn light" type="button" data-action="close">Hủy</button><button class="btn dark" type="submit">${existing?"Lưu thay đổi":"Tạo tài khoản"}</button></div></form>`);$('#account-form').onsubmit=async e=>{e.preventDefault();const username=$('#ac-user').value.trim().toUpperCase().replace(/\s+/g,"");const name=$('#ac-name').value.trim(),role=$('#ac-role').value,group=$('#ac-group').value||null;if(!username||!name)return toast("Thiếu tên đăng nhập hoặc họ tên.","err");if(["toTruong","toPho"].includes(role)&&!group)return toast("Hãy chọn tổ cho chức vụ Tổ trưởng/Tổ phó. Danh sách tổ được lấy từ cấu trúc lớp hoặc cột Tổ của danh sách học sinh.","err");if(existing){const before={...existing},next={...existing,name,role,group};if(!(await dbSet(`users/${uid}`,next)))return toast(firebaseErrMsg("Không cập nhật được tài khoản."),"err");const verify=await dbGet(`users/${uid}`);if(!verify.exists())return toast("Không xác minh được sau khi lưu.","err");state.users[uid]=verify.val();await writeSystemAudit("UPDATE","user",uid,before,state.users[uid]);closeModal();renderApp();toast("Đã cập nhật tài khoản.","ok");return}if(Object.values(state.users).some(u=>String(u.username||"").toUpperCase()===username))return toast("Tên đăng nhập đã tồn tại.","err");const password=$('#ac-pass').value;if(password.length<6)return toast("Mật khẩu tối thiểu 6 ký tự.","err");try{const made=await createAuthUser(username,password);const profile={username,name,role,group,active:true,createdAt:Date.now()};if(!(await dbSet(`users/${made.uid}`,profile)))throw new Error("profile-write-failed");try{await fb.appApi.deleteApp(made.app)}catch{}state.users[made.uid]={...profile,uid:made.uid};await writeSystemAudit("CREATE","user",made.uid,null,state.users[made.uid]);closeModal();renderApp();toast("Đã tạo tài khoản.","ok")}catch(e){console.error(e);toast(e?.code==="auth/email-already-in-use"?"Tên đăng nhập đã tồn tại.":"Tạo tài khoản thất bại.","err")}}}
 function managePage(){
   if(!isGvcn())return dashboard();
   const activeStudents=Object.values(state.students).filter(s=>s.active!==false);
@@ -292,10 +302,15 @@ function editRoster(){if(!isGvcn())return;openModal("Sửa danh sách lớp",`<d
 async function saveRoster(){const parsed=parseRoster($('#edit-roster').value),arr=parsed.students;if(!arr.length)return toast("Danh sách không hợp lệ.","err");const incoming={};arr.forEach(st=>incoming[st.id]=st);const now=Date.now(),obj={...state.students};for(const [sid,old] of Object.entries(obj))if(!incoming[sid])obj[sid]={...old,active:false,inactivatedAt:now};for(const [sid,st] of Object.entries(incoming))obj[sid]={...(obj[sid]||{}),...st,active:true,updatedAt:now};if(!(await dbSet(PATH.students,obj)))return toast("Không lưu được danh sách lên Firebase.","err");let verify;try{verify=await verifyStudents(incoming)}catch(e){return toast("Đã ghi nhưng không thể xác minh Firebase: "+(e?.message||"lỗi đọc"),"err")}if(!verify.ok)return toast(`Đã lưu nhưng Firebase chưa xác minh đủ ${arr.length} học sinh. Nhận được ${verify.count}/${arr.length}.`,"err");state.students=verify.actual;saveLocal();await writeSystemAudit("IMPORT","students",PATH.students,null,{received:arr.length,skipped:parsed.skipped.length});const extra=parsed.skipped.length?` • ${parsed.skipped.length} dòng cần kiểm tra`:"";closeModal();renderApp();toast(`Đã cập nhật danh sách: ${arr.length}/${arr.length} học sinh${extra}.`,"ok")}
 
 function findStaffByRole(role, group){
+  const g=group==null||group==""?null:String(group);
   return Object.values(state.users).find(u=>{
     if(u.role!==role||u.active===false)return false;
-    if(group!=null&&group!=="")return String(u.group)===String(group);
-    return true;
+    if(g===null)return true;
+    if(u.group!=null&&String(u.group)!=="")return String(u.group)===g;
+    // Tài khoản tạo theo quy ước cũ có thể chưa lưu group; suy ra từ username TO1 / TO1PHO.
+    const username=String(u.username||"").toUpperCase();
+    const m=username.match(role==="toPho"?/^TO(.+?)PHO$/:/^TO(.+)$/);
+    return !!m&&String(m[1])===g;
   })||null;
 }
 function assignOfficers(){
@@ -354,33 +369,34 @@ function assignOfficers(){
     const beforeUsers={};
     const beforeGroups={...state.groups};
 
-    const applyUserName=async(user,newName,label)=>{
-      if(!user||!newName)return;
-      if(String(user.name||"")===String(newName))return;
+    const applyUser=async(user,patch,label)=>{
+      if(!user)return;
+      const next={...user,...patch};
+      const changed=JSON.stringify(user)!==JSON.stringify(next);
+      if(!changed)return;
       beforeUsers[user.uid]={...user};
-      const next={...user,name:newName};
       if(!(await dbSet(`users/${user.uid}`,next)))throw new Error(`Không cập nhật được ${label}`);
       state.users[user.uid]=next;
-      updates.push(`${label}: ${user.name||"?"} → ${newName}`);
+      updates.push(`${label}: ${user.name||"?"} → ${next.name||user.name||"?"}`);
     };
 
     try{
-      if(lt&&ltSel)await applyUserName(lt,pickName(ltSel),"Lớp trưởng");
-      if(lp&&lpSel)await applyUserName(lp,pickName(lpSel),"Lớp phó");
+      if(lt&&ltSel)await applyUser(lt,{name:pickName(ltSel),role:"lopTruong",group:null},"Lớp trưởng");
+      if(lp&&lpSel)await applyUser(lp,{name:pickName(lpSel),role:"lopPho",group:null},"Lớp phó");
 
       const nextGroups={...state.groups};
       for(const el of leaderSels){
         const g=el.dataset.g;
         const name=pickName(el);
         const leader=findStaffByRole("toTruong",g);
-        if(leader&&name)await applyUserName(leader,name,`Tổ trưởng tổ ${g}`);
+        if(leader&&name)await applyUser(leader,{name,role:"toTruong",group:String(g)},`Tổ trưởng tổ ${g}`);
         if(nextGroups[g])nextGroups[g]={...nextGroups[g],leaderName:name||nextGroups[g].leaderName||""};
       }
       for(const el of deputySels){
         const g=el.dataset.g;
         const name=pickName(el);
         const deputy=findStaffByRole("toPho",g);
-        if(deputy&&name)await applyUserName(deputy,name,`Tổ phó tổ ${g}`);
+        if(deputy&&name)await applyUser(deputy,{name,role:"toPho",group:String(g)},`Tổ phó tổ ${g}`);
         if(nextGroups[g])nextGroups[g]={...nextGroups[g],deputyName:name||nextGroups[g].deputyName||""};
       }
       // also sync LT/LP names is already on users; groups only store to leaders
