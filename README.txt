@@ -49,3 +49,14 @@ CẬP NHẬT (chấm chéo giữa các tổ – GVCN chỉ định):
 - Dữ liệu: classConfig/crossGrading ("off"|"assigned") và classConfig/crossTargets {"1":"2",...}.
 - Firebase Rules đã cập nhật để chặn ở phía máy chủ. BẮT BUỘC sau khi deploy: Firebase Console →
   Realtime Database → Rules → dán lại firebase-rules.json → Publish.
+
+
+CẬP NHẬT (GVCN đổi mật khẩu từng tài khoản):
+- Trong Quản lý → Tài khoản, mỗi tài khoản khác GVCN có nút “🔑 Mật khẩu”.
+- Mật khẩu mới được đổi qua Firebase Authentication bằng API server, không lưu mật khẩu vào Realtime Database.
+- API dùng Firebase Admin SDK và xác minh ID token của người đang đăng nhập; chỉ GVCN active mới được reset. Firebase Admin SDK yêu cầu môi trường Node.js 22+.
+- Vercel bắt buộc có Environment Variables:
+  • FIREBASE_SERVICE_ACCOUNT_JSON = toàn bộ nội dung JSON Service Account Firebase.
+  • FIREBASE_DATABASE_URL = https://chamdiem12a7-default-rtdb.asia-southeast1.firebasedatabase.app
+- Sau khi thêm biến môi trường, Redeploy Vercel.
+- Sau khi đổi, phiên đăng nhập của tài khoản đích sẽ bị thu hồi refresh token để buộc dùng mật khẩu mới.

@@ -1,0 +1,10 @@
+{
+  "name": "thi-dua-12a7",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "firebase-admin": "14.5.0"
+  }
+}
