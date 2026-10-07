@@ -445,8 +445,11 @@ async function resetAccountPassword(uid){
     if(a!==b)return toast("Hai mật khẩu chưa khớp.","err");
     const submit=e.submitter||$('#admin-pwform button[type=submit]'); if(submit){submit.disabled=true;submit.textContent="Đang đổi..."}
     try{
-      const current=fb.authApi.currentUser;
-      if(!current)throw new Error("not-authenticated");
+      // Firebase v9+ stores the signed-in user on the Auth instance (fb.auth),
+      // not on the imported authApi module. Fall back to state.user because it
+      // is populated by onAuthStateChanged after a successful login.
+      const current=fb.auth?.currentUser || state.user;
+      if(!current || typeof current.getIdToken !== "function") throw new Error("not-authenticated");
       const token=await current.getIdToken(true);
       const response=await fetch("/api/admin/reset-password",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},body:JSON.stringify({targetUid:uid,newPassword:a})});
       let data={}; try{data=await response.json()}catch{}
