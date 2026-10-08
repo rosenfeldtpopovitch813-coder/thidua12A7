@@ -1,30 +1,111 @@
-const { getApps, initializeApp, cert } = require("firebase-admin/app");
-const { getAuth } = require("firebase-admin/auth");
-const { getDatabase } = require("firebase-admin/database");
+let adminModulesPromise;
 
-function adminServices() {
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing");
+async function loadAdminModules() {
+  if (!adminModulesPromise) {
+    adminModulesPromise = Promise.all([
+      import("firebase-admin/app"),
+      import("firebase-admin/auth"),
+      import("firebase-admin/database"),
+    ]).then(([app, auth, database]) => ({ app, auth, database }));
   }
-  if (!process.env.FIREBASE_DATABASE_URL) {
-    throw new Error("FIREBASE_DATABASE_URL is missing");
-  }
-
-  const app = getApps().length
-    ? getApps()[0]
-    : initializeApp({
-        credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)),
-        databaseURL: process.env.FIREBASE_DATABASE_URL,
-      });
-
-  return {
-    auth: getAuth(app),
-    db: getDatabase(app),
-  };
+  return adminModulesPromise;
 }
 
 function json(res, status, body) {
   res.status(status).setHeader("Cache-Control", "no-store").json(body);
+}
+
+function getServiceAccount() {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "";
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_B64 || "";
+  if (!raw && !b64) {
+    const e = new Error("SERVICE_ACCOUNT_MISSING");
+    e.code = "config/service-account-missing";
+    throw e;
+  }
+
+  let parsed;
+  try {
+    const text = raw || Buffer.from(b64, "base64").toString("utf8");
+    parsed = JSON.parse(text);
+  } catch {
+    const e = new Error("SERVICE_ACCOUNT_INVALID_JSON");
+    e.code = "config/service-account-invalid-json";
+    throw e;
+  }
+
+  if (!parsed || !parsed.project_id || !parsed.client_email || !parsed.private_key) {
+    const e = new Error("SERVICE_ACCOUNT_INCOMPLETE");
+    e.code = "config/service-account-incomplete";
+    throw e;
+  }
+
+  // Protect against a value pasted with literal \\n instead of real newlines.
+  parsed.private_key = String(parsed.private_key).replace(/\\n/g, "\n");
+  return parsed;
+}
+
+function getDatabaseUrl() {
+  const url = String(process.env.FIREBASE_DATABASE_URL || "").trim();
+  if (!url) {
+    const e = new Error("DATABASE_URL_MISSING");
+    e.code = "config/database-url-missing";
+    throw e;
+  }
+  return url.replace(/\/+$/, "");
+}
+
+let cachedApp;
+
+async function getServices() {
+  const modules = await loadAdminModules();
+  const { getApps, initializeApp, cert } = modules.app;
+  const { getAuth } = modules.auth;
+  const { getDatabase } = modules.database;
+
+  if (!cachedApp) {
+    cachedApp = getApps().length
+      ? getApps()[0]
+      : initializeApp({
+          credential: cert(getServiceAccount()),
+          databaseURL: getDatabaseUrl(),
+        });
+  }
+
+  return { auth: getAuth(cachedApp), db: getDatabase(cachedApp) };
+}
+
+function errorResponse(res, err) {
+  console.error("reset-password error", err);
+  const code = String(err?.code || "");
+  const message = String(err?.message || "");
+
+  if (code.startsWith("config/")) {
+    const configMessages = {
+      "config/service-account-missing": "Vercel chưa có FIREBASE_SERVICE_ACCOUNT_JSON (hoặc FIREBASE_SERVICE_ACCOUNT_JSON_B64).",
+      "config/service-account-invalid-json": "FIREBASE_SERVICE_ACCOUNT_JSON không phải JSON hợp lệ.",
+      "config/service-account-incomplete": "Service Account thiếu project_id, client_email hoặc private_key.",
+      "config/database-url-missing": "Vercel chưa có FIREBASE_DATABASE_URL.",
+    };
+    return json(res, 500, { error: configMessages[code] || "Cấu hình Firebase Admin chưa đúng.", code });
+  }
+
+  if (code === "auth/id-token-expired" || code === "auth/argument-error" || code === "auth/invalid-id-token") {
+    return json(res, 401, { error: "UNAUTHENTICATED", code });
+  }
+  if (code === "auth/user-not-found") {
+    return json(res, 404, { error: "Tài khoản này tồn tại trong danh sách lớp nhưng không tồn tại trong Firebase Authentication.", code });
+  }
+  if (code === "auth/invalid-password") {
+    return json(res, 400, { error: "Mật khẩu không hợp lệ. Hãy dùng ít nhất 6 ký tự.", code });
+  }
+  if (code === "auth/too-many-requests") {
+    return json(res, 429, { error: "Firebase đang giới hạn yêu cầu. Hãy thử lại sau ít phút.", code });
+  }
+  if (message.includes("FIREBASE_SERVICE_ACCOUNT") || message.includes("FIREBASE_DATABASE_URL")) {
+    return json(res, 500, { error: "Server Firebase Admin chưa được cấu hình đúng trên Vercel.", code: "CONFIG_ERROR" });
+  }
+  return json(res, 500, { error: message || "Không thể đổi mật khẩu tài khoản này.", code: code || "SERVER_ERROR" });
 }
 
 module.exports = async function handler(req, res) {
@@ -35,16 +116,16 @@ module.exports = async function handler(req, res) {
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
     if (!token) return json(res, 401, { error: "UNAUTHENTICATED" });
 
-    const { auth, db } = adminServices();
+    const { auth, db } = await getServices();
     const decoded = await auth.verifyIdToken(token);
     const actorSnap = await db.ref(`users/${decoded.uid}`).get();
     const actor = actorSnap.exists() ? actorSnap.val() : null;
 
-    if (!actor || actor.active === false || actor.role !== "gvcn") {
+    if (!actor || actor.active === false || String(actor.role || "").toLowerCase() !== "gvcn") {
       return json(res, 403, { error: "FORBIDDEN" });
     }
 
-    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const targetUid = String(body.targetUid || "").trim();
     const newPassword = String(body.newPassword || "");
 
@@ -55,7 +136,7 @@ module.exports = async function handler(req, res) {
     const targetSnap = await db.ref(`users/${targetUid}`).get();
     const target = targetSnap.exists() ? targetSnap.val() : null;
     if (!target) return json(res, 404, { error: "Không tìm thấy hồ sơ tài khoản" });
-    if (target.role === "gvcn") return json(res, 403, { error: "Không thể dùng chức năng này để đổi mật khẩu GVCN" });
+    if (String(target.role || "").toLowerCase() === "gvcn") return json(res, 403, { error: "Không thể dùng chức năng này để đổi mật khẩu GVCN" });
 
     const userRecord = await auth.updateUser(targetUid, { password: newPassword });
     await auth.revokeRefreshTokens(targetUid);
@@ -66,14 +147,6 @@ module.exports = async function handler(req, res) {
       username: target.username || "",
     });
   } catch (err) {
-    console.error("reset-password error", err);
-    const code = String(err?.code || "");
-    if (code === "auth/id-token-expired" || code === "auth/argument-error" || code === "auth/invalid-id-token") {
-      return json(res, 401, { error: "UNAUTHENTICATED" });
-    }
-    if (String(err?.message || "").includes("FIREBASE_SERVICE_ACCOUNT_JSON") || String(err?.message || "").includes("FIREBASE_DATABASE_URL")) {
-      return json(res, 500, { error: "Server chưa cấu hình FIREBASE_SERVICE_ACCOUNT_JSON / FIREBASE_DATABASE_URL" });
-    }
-    return json(res, 500, { error: "Không thể đổi mật khẩu tài khoản này" });
+    return errorResponse(res, err);
   }
 };
