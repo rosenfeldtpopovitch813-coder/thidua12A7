@@ -60,3 +60,9 @@ CẬP NHẬT (GVCN đổi mật khẩu từng tài khoản):
   • FIREBASE_DATABASE_URL = https://chamdiem12a7-default-rtdb.asia-southeast1.firebasedatabase.app
 - Sau khi thêm biến môi trường, Redeploy Vercel.
 - Sau khi đổi, phiên đăng nhập của tài khoản đích sẽ bị thu hồi refresh token để buộc dùng mật khẩu mới.
+
+CẬP NHẬT v6 — PHÂN QUYỀN CHỨC VỤ
+- GVCN có thể tạo chức vụ tùy chỉnh với: tên chức vụ, phạm vi (toàn lớp/theo tổ/chỉ xem), và quyền điểm cộng, điểm trừ hoặc cả hai.
+- Chức vụ tùy chỉnh có thể sửa/xóa; không thể xóa khi đang có tài khoản sử dụng.
+- Nút Điểm cộng/Điểm trừ và kiểm tra quyền sửa/xóa bản ghi được áp dụng theo permission của chức vụ.
+- Firebase Rules đã cập nhật để kiểm soát quyền cộng/trừ của chức vụ tùy chỉnh ở backend.
