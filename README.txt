@@ -66,3 +66,11 @@ CẬP NHẬT v6 — PHÂN QUYỀN CHỨC VỤ
 - Chức vụ tùy chỉnh có thể sửa/xóa; không thể xóa khi đang có tài khoản sử dụng.
 - Nút Điểm cộng/Điểm trừ và kiểm tra quyền sửa/xóa bản ghi được áp dụng theo permission của chức vụ.
 - Firebase Rules đã cập nhật để kiểm soát quyền cộng/trừ của chức vụ tùy chỉnh ở backend.
+
+
+V8 CHUC VU + TAI KHOAN
+- Them tai khoan: trong cung mot form co Ten tai khoan, Ho ten, Chuc vu, To, Mat khau.
+- Co the chon “Tao chuc vu moi...” ngay trong form; nhap ten chuc vu, pham vi (toan lop/theo to/chi xem), quyen +, quyen -.
+- GVCN co nut Xoa tai khoan. Xoa vinh vien ca Firebase Authentication va users profile qua /api/admin/delete-user.
+- GVCN reset mat khau qua /api/admin/reset-password.
+- Can 2 Vercel env: FIREBASE_SERVICE_ACCOUNT_JSON va FIREBASE_DATABASE_URL.
