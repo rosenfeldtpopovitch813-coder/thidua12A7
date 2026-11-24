@@ -74,3 +74,14 @@ V8 CHUC VU + TAI KHOAN
 - GVCN co nut Xoa tai khoan. Xoa vinh vien ca Firebase Authentication va users profile qua /api/admin/delete-user.
 - GVCN reset mat khau qua /api/admin/reset-password.
 - Can 2 Vercel env: FIREBASE_SERVICE_ACCOUNT_JSON va FIREBASE_DATABASE_URL.
+
+
+CẬP NHẬT (Danh sách nhổ cỏ & phân quyền tài khoản quản lý):
+- Thêm tab "Nhổ cỏ" trên thanh điều hướng cho mọi tài khoản đang hoạt động (xem danh sách, tìm kiếm, lọc theo tổ, xuất CSV, in).
+- GVCN luôn có toàn quyền quản lý và có thể chọn thêm một hoặc nhiều tài khoản được quyền quản lý danh sách nhổ cỏ:
+  • Vào Quản lý → thẻ "Quản lý danh sách nhổ cỏ" → tích chọn tài khoản → "Lưu tài khoản quản lý", HOẶC
+  • Vào trực tiếp tab "Nhổ cỏ" → bấm "⚙ Chọn tài khoản quản lý".
+- Tài khoản được chọn (và GVCN) có thể thêm một hoặc nhiều học sinh vào danh sách, sửa ngày/lý do ghi chú, xóa từng thành viên (có hoàn tác 12 giây) hoặc xóa tất cả.
+- Danh sách nhổ cỏ được lưu độc lập tại node "weeding" (weeding/managers và weeding/items), KHÔNG bị reset khi hết tuần hay khi GVCN chốt tuần — thành viên chỉ rời danh sách khi người quản lý xóa.
+- Đã tích hợp sao lưu/khôi phục JSON và ghi nhật ký Audit (WEEDING_ADD, WEEDING_UPDATE, WEEDING_REMOVE, WEEDING_RESTORE, WEEDING_MANAGERS).
+- BẮT BUỘC sau khi deploy: mở Firebase Console → Realtime Database → Rules → dán toàn bộ nội dung firebase-rules.json mới → Publish.

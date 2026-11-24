@@ -16,10 +16,11 @@ window.addEventListener("unhandledrejection",e=>{console.error(e.reason);if(!win
 
 const FIREBASE_CONFIG=window.TD_FIREBASE_CONFIG;
 if(!FIREBASE_CONFIG)throw new Error("Không tải được firebase-config.js");
-const PATH={config:"classConfig",groups:"groups",students:"students",users:"users",records:"records",reports:"reports",weeks:"weeks",audit:"audit"};
+const PATH={config:"classConfig",groups:"groups",students:"students",users:"users",records:"records",reports:"reports",weeks:"weeks",audit:"audit",weeding:"weeding"};
 const RULES_MINUS=[["Đi học muộn",-5,"lần"],["Vắng học có phép",-2,"buổi"],["Vắng học không phép",-5,"buổi"],["Tự ý bỏ tiết",-5,"tiết"],["Không thực hiện đúng quy định xin phép khi nghỉ học",-3,"lần"],["Không chuẩn bị sách vở, đồ dùng học tập",-2,"lần"],["Không học bài, không làm bài tập",-2,"lần"],["Không đeo bảng tên đúng quy định",-5,"lần"],["Không gắn/đeo logo trường đúng quy định",-5,"lần"],["Đoàn viên không đeo huy hiệu Đoàn theo quy định",-5,"lần"],["Mặc đồng phục/trang phục không đúng quy định",-5,"lần"],["Bảng tên, logo, huy hiệu không đúng quy định",-5,"lần"],["Cố tình tháo, che giấu hoặc không chấp hành sau khi được nhắc nhở",-10,"lần"],["Nói chuyện, làm việc riêng trong giờ học",-2,"lần"],["Sử dụng điện thoại trong giờ học (trừ trường hợp giáo viên cho phép để phục vụ học tập)",-5,"lần"],["Gây mất trật tự, ảnh hưởng đến lớp",-3,"lần"],["Tập thể dục không nghiêm túc",-5,"lần"],["Trốn tập thể dục",-10,"lần"],["Không thực hiện nghiêm túc hoạt động tập thể",-3,"lần"],["Không thực hiện trực nhật theo phân công",-3,"lần"],["Xả rác, làm mất vệ sinh",-3,"lần"],["Tự ý rời lớp hoặc khu vực quy định",-5,"lần"],["Thiếu lễ phép, thiếu tôn trọng thầy cô, nhân viên nhà trường",-5,"lần"],["Gây gổ, xúc phạm hoặc làm ảnh hưởng đến bạn",null,"lần",5,10],["Cố ý làm hư hỏng bàn ghế, thiết bị hoặc tài sản chung",null,"lần",5,10],["Vi phạm nội quy khác của trường/lớp",null,"theo mức độ"]];
 const RULES_PLUS=[["Tích cực giúp đỡ bạn trong học tập",2],["Chủ động thực hiện nhiệm vụ chung của lớp",2],["Có việc làm tốt, được giáo viên ghi nhận",2],["Tích cực tham gia hoạt động của lớp, trường",2],["Có tiến bộ rõ rệt về học tập hoặc ý thức",3],["Có thành tích nổi bật, đóng góp tích cực cho lớp/trường",5]];
-const state={fbReady:false,realtimeConnected:null,user:null,profile:null,config:null,groups:{},students:{},users:{},records:{},reports:{},weeks:{},audit:{},lastDeleted:null,tab:"home",week:mkWeek(new Date()),group:"all",search:"",setupStep:1,syncError:null,setup:{className:"",schoolYear:"2026–2027",groupCount:4,groups:[],studentsText:"",ltId:"",lpId:"",studentPass:"",gvcnPass:"",ltPass:"",lpPass:"",groupLeaders:{}}};
+const WEEDING_QUICK_NOTES=["Đi học muộn","Không trực nhật","Vi phạm đồng phục","Nói chuyện / mất trật tự","Chưa hoàn thành nhổ cỏ"];
+const state={fbReady:false,realtimeConnected:null,user:null,profile:null,config:null,groups:{},students:{},users:{},records:{},reports:{},weeks:{},audit:{},weeding:{managers:{},items:{}},weedingSearch:"",weedingGroup:"all",weedingError:null,lastDeleted:null,lastDeletedWeeding:null,tab:"home",week:mkWeek(new Date()),group:"all",search:"",setupStep:1,syncError:null,setup:{className:"",schoolYear:"2026–2027",groupCount:4,groups:[],studentsText:"",ltId:"",lpId:"",studentPass:"",gvcnPass:"",ltPass:"",lpPass:"",groupLeaders:{}}};
 let fb={app:null,auth:null,db:null,authApi:null,dbApi:null,appApi:null};
 let realtimeUnsubs=[];
 let realtimeRenderTimer=null;
@@ -55,7 +56,49 @@ const sameGroup=s=>!!state.profile?.group&&String(s?.group)===String(state.profi
 const canGradeStudent=s=>{if(!s||!isStaff())return false;if(isGvcn())return true;if(["lopTruong","lopPho"].includes(effectiveBaseRole()))return true;if(!isGroupRole())return false;const t=myTarget();return t?String(s.group)===t:sameGroup(s)};
 const scopeStudent=s=>canGradeStudent(s)||(isGroupRole()&&isStaff()&&sameGroup(s));
 const locked=()=>!!state.weeks[state.week]?.finalized;
-function saveLocal(){try{localStorage.setItem("td12a7-v6",JSON.stringify({config:state.config,groups:state.groups,students:state.students,users:state.users,records:state.records,reports:state.reports,weeks:state.weeks,audit:state.audit,week:state.week}))}catch{}}
+function localDateIso(dt=new Date()){const d=new Date(dt);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
+function formatDateVi(iso,fallbackTs){if(iso&&/^\d{4}-\d{2}-\d{2}$/.test(iso)){const [y,m,d]=iso.split("-");return `${d}/${m}/${y}`}if(fallbackTs)return new Date(Number(fallbackTs)).toLocaleDateString("vi-VN");return ""}
+const weedingManagersMap=()=>state.weeding?.managers&&typeof state.weeding.managers==="object"?state.weeding.managers:{};
+const weedingItemsMap=()=>state.weeding?.items&&typeof state.weeding.items==="object"?state.weeding.items:{};
+const isWeedingManager=(uid=state.user?.uid)=>!!uid&&weedingManagersMap()[uid]?.active===true;
+const canManageWeeding=()=>!!state.user&&state.profile?.active!==false&&(isGvcn()||isWeedingManager());
+function activeWeedingManagers(){
+  const raw=weedingManagersMap();
+  const list=Object.entries(raw).filter(([,m])=>m&&m.active===true).map(([uid,m])=>{
+    const u=state.users?.[uid];
+    if(isGvcn()&&u&&u.active===false)return null;
+    if(isGvcn()&&Object.keys(state.users||{}).length>0&&!u)return null;
+    return {uid,username:u?.username||m.username||"",name:u?.name||m.name||m.username||"Tài khoản",roleLabel:u?userRoleLabel(u):(m.roleLabel||""),group:u?.group||null,assignedAt:m.assignedAt||0};
+  }).filter(Boolean);
+  return list.sort((a,b)=>String(a.name).localeCompare(String(b.name),"vi"));
+}
+function weedingManagerSummaryText(){
+  const mgrs=activeWeedingManagers();
+  if(!mgrs.length)return "GVCN";
+  return ["GVCN",...mgrs.map(m=>`${m.name}${m.roleLabel?` (${m.roleLabel})`:""}`)].join(", ");
+}
+function weedingItemWeek(item){
+  if(item?.addedWeek)return item.addedWeek;
+  if(item?.addedDate&&/^\d{4}-\d{2}-\d{2}$/.test(item.addedDate))return mkWeek(new Date(item.addedDate+"T12:00:00"));
+  return item?.addedAt?mkWeek(new Date(Number(item.addedAt))):mkWeek(new Date());
+}
+const isWeedingCarriedOver=item=>weedingItemWeek(item)<mkWeek(new Date());
+function weedingItemsList(){
+  return Object.values(weedingItemsMap()).filter(Boolean).map(item=>{
+    const st=state.students?.[item.studentId];
+    return {...item,studentName:st?.name||item.studentName||item.studentId,studentGroup:st?.group??item.studentGroup??""};
+  }).sort((a,b)=>Number(b.addedAt||0)-Number(a.addedAt||0)||compareStudentsByGroup({id:a.studentId,name:a.studentName,group:a.studentGroup},{id:b.studentId,name:b.studentName,group:b.studentGroup}));
+}
+function visibleWeedingItems(){
+  const q=String(state.weedingSearch||"").trim().toLowerCase();
+  return weedingItemsList().filter(item=>(state.weedingGroup==="all"||String(item.studentGroup)===String(state.weedingGroup))&&(!q||(`${item.studentId} ${item.studentName} ${item.note||""} ${item.addedByName||""}`).toLowerCase().includes(q)));
+}
+function weedingErrMsg(err,fallback){
+  const code=String(err?.code||err?.message||err?.friendly||"");
+  if(code.includes("PERMISSION_DENIED")||code.includes("permission-denied"))return "Firebase từ chối quyền với danh sách nhổ cỏ (PERMISSION_DENIED). GVCN hãy mở Firebase Console → Realtime Database → Rules → dán nội dung firebase-rules.json mới → Publish.";
+  return fallback||"Không thể đồng bộ danh sách nhổ cỏ với Firebase.";
+}
+function saveLocal(){try{localStorage.setItem("td12a7-v6",JSON.stringify({config:state.config,groups:state.groups,students:state.students,users:state.users,records:state.records,reports:state.reports,weeks:state.weeks,audit:state.audit,weeding:state.weeding,week:state.week}))}catch{}}
 function loadLocal(){try{const d=JSON.parse(localStorage.getItem("td12a7-v5")||"null");if(d)Object.assign(state,d)}catch{}}
 function toast(msg,type=""){const e=document.createElement("div");e.className=`toast ${type}`;e.textContent=msg;$("#toastroot").appendChild(e);setTimeout(()=>e.remove(),3000)}
 function grade(x){return x>=90?["Tốt","good"]:x>=80?["Khá","ok"]:x>=65?["Đạt","warn"]:["Cần cố gắng","bad"]}
@@ -122,6 +165,24 @@ function startRealtimeSync(uid){
   watchValue(PATH.students,val=>{state.students=val||{}});
   watchValue(PATH.records,val=>{state.records=val||{}});
   watchValue(PATH.weeks,val=>{state.weeks=val||{}});
+  const unsubWeeding=fb.dbApi.onValue(fb.dbApi.ref(fb.db,PATH.weeding),snap=>{
+    try{
+      const val=snap.exists()?snap.val():null;
+      state.weeding={managers:val?.managers||{},items:val?.items||{}};
+      state.weedingError=null;
+      saveLocal();
+      scheduleRealtimeRender();
+    }catch(e){
+      console.warn("Realtime weeding update failed",e);
+      state.weedingError=e;
+      scheduleRealtimeRender();
+    }
+  },err=>{
+    console.warn("Firebase realtime listener failed",PATH.weeding,err);
+    state.weedingError=err;
+    scheduleRealtimeRender();
+  });
+  realtimeUnsubs.push(unsubWeeding);
 
   if(isGvcn()){
     watchValue(PATH.users,val=>{
@@ -162,6 +223,15 @@ async function syncAll(){
     state.students=students.exists()?students.val()||{}:{};
     state.records=records.exists()?records.val()||{}:{};
     state.weeks=weeks.exists()?weeks.val()||{}:{};
+    try{
+      const wd=await dbGet(PATH.weeding);
+      const wv=wd.exists()?wd.val():null;
+      state.weeding={managers:wv?.managers||{},items:wv?.items||{}};
+      state.weedingError=null;
+    }catch(wErr){
+      state.weedingError=wErr;
+      console.warn("Firebase weeding sync failed",wErr);
+    }
     if(isGvcn()){
       const [users,reports,audit]=await Promise.all([PATH.users,PATH.reports,PATH.audit].map(dbGet));
       const rawUsers=users.exists()?users.val()||{}:{};
@@ -181,8 +251,8 @@ async function syncAll(){
 
 async function verifyStudents(expectedStudents){const snap=await dbGet(PATH.students);if(!snap?.exists())return{ok:false,count:0,missing:Object.keys(expectedStudents),extra:[]};const actual=snap.val()||{};const ids=Object.keys(expectedStudents);const missing=ids.filter(k=>!actual[k]);const count=ids.filter(k=>actual[k]?.active!==false).length;return{ok:missing.length===0&&count===ids.length,count,missing,actual};}
 function shell(html){return `<div class="app">${topbar()}<main class="main">${html}</main><button class="fab no-print" data-action="anonymous-report">📣 Phản ánh ẩn danh</button></div>`}
-function topbar(){const nav=[['home','Tổng quan'],['records','Nhật ký'],['students','Học sinh'],['rules','Quy chế']];if(isGvcn())nav.push(['reports','Phản ánh'],['manage','Quản lý']);return `<header class="top"><div class="topin"><div class="brand"><div class="logo">TD</div><div><div class="brand-title">Thi đua ${esc(state.config?.className||"")}</div><div class="brand-sub">${esc(state.config?.schoolYear||"")}</div></div></div><nav class="nav">${nav.map(n=>`<button class="${state.tab===n[0]?"active":""}" data-tab="${n[0]}">${n[1]}</button>`).join("")}</nav><div class="spacer"></div><div class="status"><i class="dot ${state.fbReady&&state.realtimeConnected!==false?"ok":""}"></i>${state.fbReady?(state.realtimeConnected===false?"Mất kết nối":state.realtimeConnected===true?"Đang đồng bộ":"Kết nối...") : "Cục bộ"}</div><div class="userchip"><span class="avatar">${initials(state.profile?.name)}</span><span>${esc(state.profile?.name||"")} · ${esc(userRoleLabel(state.profile))}</span></div>${isGvcn()?`<button class="btn small gray no-print" data-action="password">🔑</button>`:""}<button class="btn small dark no-print" data-action="logout">Thoát</button></div><div class="mnav">${nav.map(n=>`<button class="${state.tab===n[0]?"active":""}" data-tab="${n[0]}">${n[1]}</button>`).join("")}</div></header>`}
-function dashboard(){const all=rows(),vis=visibleRows(),avg=all.length?all.reduce((a,r)=>a+r.score,0)/all.length:0,good=all.filter(r=>r.score>=90).length,pending=Object.values(state.records).filter(r=>r.week===state.week&&r.status==="pending"&&scopeStudent(state.students[r.studentId])).length;return `<section class="hero">${state.syncError?`<div class="warning no-print" style="margin-bottom:10px">${esc(state.syncError?.message||"Firebase đang gặp lỗi đồng bộ.")} <button class="btn small light" data-action="retry-sync">Thử lại</button></div>`:""}<div class="eyebrow"><span class="pill soft">${esc(currentActor())}</span><span class="pill ${locked()?"green":"amber"}">${locked()?"✓ Tuần đã chốt":"● Tuần đang mở"}</span><span class="pill soft">${roleScopeText()}</span></div><h1>${esc(state.config?.className||"")} · Tuần ${esc(weekLabel(state.week))}</h1><p>100 điểm cơ bản/tuần • điểm cộng tối đa +10 • điểm cuối tuần tối đa 100. GVCN là người kiểm tra và chốt điểm.</p><div class="actions no-print"><button class="btn light" data-action="week">📅 Đổi tuần</button>${canWriteRecord("plus")?`<button class="btn green" data-action="plus">＋ Điểm cộng</button>`:""}${canWriteRecord("minus")?`<button class="btn red" data-action="minus">− Điểm trừ</button>`:""}${isGvcn()?`<button class="btn amber" data-action="review">✓ Kiểm tra & chốt</button>`:""}</div></section><section class="stats"><div class="stat"><div class="stat-label">HS trong phạm vi</div><div class="stat-value">${vis.length}</div><div class="stat-sub">${isGvcn()?"Toàn lớp":"Theo vai trò"}</div></div><div class="stat"><div class="stat-label">Điểm trung bình</div><div class="stat-value">${avg.toFixed(1)}</div><div class="stat-sub">Tuần hiện tại</div></div><div class="stat"><div class="stat-label">Xếp loại Tốt</div><div class="stat-value">${good}</div><div class="stat-sub">Từ 90 điểm</div></div><div class="stat"><div class="stat-label">Chờ xem xét</div><div class="stat-value">${pending}</div><div class="stat-sub">Cần GVCN xử lý</div></div><div class="stat"><div class="stat-label">Trạng thái</div><div class="stat-value" style="font-size:19px">${locked()?"ĐÃ CHỐT":"ĐANG MỞ"}</div><div class="stat-sub">${locked()?"Không ghi thêm điểm":"Có thể ghi nhận"}</div></div></section><section class="grid"><div class="card"><div class="cardhead"><div><div class="title">Bảng xếp hạng</div><div class="sub">${esc(weekLabel(state.week))}</div></div><div class="actions" style="margin:0"><button class="btn small light no-print" data-action="csv">Xuất CSV</button><button class="btn small light no-print" data-action="print">In</button></div></div><div class="toolbar no-print"><div class="search"><input id="search" class="input" value="${esc(state.search)}" placeholder="🔎 Tìm mã hoặc tên học sinh"></div><select id="group" class="select" style="width:160px"><option value="all">Tất cả tổ</option>${groupList().map(g=>`<option value="${esc(g.id)}" ${String(state.group)===String(g.id)?"selected":""}>Tổ ${esc(g.name||g.id)}</option>`).join("")}</select></div><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Học sinh</th><th>Tổ</th><th>Cộng</th><th>Trừ</th><th>Điểm</th><th>Xếp loại</th><th class="no-print"> </th></tr></thead><tbody>${vis.length?vis.map((r,i)=>{const [g,cls]=grade(r.score);return `<tr><td><strong>${i+1}</strong></td><td><div class="person"><div class="personava">${initials(r.st.name)}</div><div><div style="font-weight:900">${esc(r.st.name)}</div><div class="muted tiny">${esc(r.st.id)}</div></div></div></td><td>Tổ ${esc(r.st.group)}</td><td style="color:#047857;font-weight:900">+${r.plus}</td><td style="color:#be123c;font-weight:900">−${r.minus}</td><td><span class="score ${r.score>=90?"g":r.score>=65?"w":"b"}">${r.score}</span></td><td><span class="grade ${cls}">${g}</span>${r.pending?`<div class="tiny" style="margin-top:3px;color:#92400e">${r.pending} chờ</div>`:""}</td><td class="no-print"><button class="btn small gray" data-action="detail:${r.st.id}">Chi tiết</button></td></tr>`}).join(""):"<tr><td colspan='8' class='empty'>Chưa có học sinh.</td></tr>"}</tbody></table></div></div><div class="card"><div class="cardhead"><div><div class="title">Top tuần</div><div class="sub">Theo điểm hiện tại</div></div></div><div class="pad"><div class="list">${vis.slice(0,7).map((r,i)=>`<div class="item"><div class="itemrow"><div class="rank">${i+1}</div><div class="grow"><div class="fw">${esc(r.st.name)}</div><div class="tiny muted">Tổ ${esc(r.st.group)}</div></div><strong>${r.score}</strong></div></div>`).join("")||'<div class="empty">Chưa có dữ liệu.</div>'}</div><div class="sectionline"></div><div class="notice">Quy trình: tổ trưởng ghi nhận → trường hợp chưa rõ để “Chờ GVCN” → GVCN kiểm tra → chốt tuần.</div></div></div></section>`}
+function topbar(){const weedingCount=weedingItemsList().length;const nav=[['home','Tổng quan'],['records','Nhật ký'],['students','Học sinh'],['weeding',`Nhổ cỏ${weedingCount?` <span class="navbadge">${weedingCount}</span>`:""}`],['rules','Quy chế']];if(isGvcn())nav.push(['reports','Phản ánh'],['manage','Quản lý']);return `<header class="top"><div class="topin"><div class="brand"><div class="logo">TD</div><div><div class="brand-title">Thi đua ${esc(state.config?.className||"")}</div><div class="brand-sub">${esc(state.config?.schoolYear||"")}</div></div></div><nav class="nav">${nav.map(n=>`<button class="${state.tab===n[0]?"active":""}" data-tab="${n[0]}">${n[1]}</button>`).join("")}</nav><div class="spacer"></div><div class="status"><i class="dot ${state.fbReady&&state.realtimeConnected!==false?"ok":""}"></i>${state.fbReady?(state.realtimeConnected===false?"Mất kết nối":state.realtimeConnected===true?"Đang đồng bộ":"Kết nối...") : "Cục bộ"}</div><div class="userchip"><span class="avatar">${initials(state.profile?.name)}</span><span>${esc(state.profile?.name||"")} · ${esc(userRoleLabel(state.profile))}</span></div>${isGvcn()?`<button class="btn small gray no-print" data-action="password">🔑</button>`:""}<button class="btn small dark no-print" data-action="logout">Thoát</button></div><div class="mnav">${nav.map(n=>`<button class="${state.tab===n[0]?"active":""}" data-tab="${n[0]}">${n[1]}</button>`).join("")}</div></header>`}
+function dashboard(){const all=rows(),vis=visibleRows(),avg=all.length?all.reduce((a,r)=>a+r.score,0)/all.length:0,good=all.filter(r=>r.score>=90).length,pending=Object.values(state.records).filter(r=>r.week===state.week&&r.status==="pending"&&scopeStudent(state.students[r.studentId])).length,weedingCount=weedingItemsList().length;return `<section class="hero">${state.syncError?`<div class="warning no-print" style="margin-bottom:10px">${esc(state.syncError?.message||"Firebase đang gặp lỗi đồng bộ.")} <button class="btn small light" data-action="retry-sync">Thử lại</button></div>`:""}<div class="eyebrow"><span class="pill soft">${esc(currentActor())}</span><span class="pill ${locked()?"green":"amber"}">${locked()?"✓ Tuần đã chốt":"● Tuần đang mở"}</span><span class="pill soft">${roleScopeText()}</span>${!isGvcn()&&isWeedingManager()?`<span class="pill green">🌿 Quản lý nhổ cỏ</span>`:""}</div><h1>${esc(state.config?.className||"")} · Tuần ${esc(weekLabel(state.week))}</h1><p>100 điểm cơ bản/tuần • điểm cộng tối đa +10 • điểm cuối tuần tối đa 100. GVCN là người kiểm tra và chốt điểm.</p><div class="actions no-print"><button class="btn light" data-action="week">📅 Đổi tuần</button>${canWriteRecord("plus")?`<button class="btn green" data-action="plus">＋ Điểm cộng</button>`:""}${canWriteRecord("minus")?`<button class="btn red" data-action="minus">− Điểm trừ</button>`:""}${isGvcn()?`<button class="btn amber" data-action="review">✓ Kiểm tra & chốt</button>`:""}<button class="btn light" data-action="open-weeding">🌿 DS nhổ cỏ${weedingCount?` (${weedingCount})`:""}</button></div></section><section class="stats"><div class="stat"><div class="stat-label">HS trong phạm vi</div><div class="stat-value">${vis.length}</div><div class="stat-sub">${isGvcn()?"Toàn lớp":"Theo vai trò"}</div></div><div class="stat"><div class="stat-label">Điểm trung bình</div><div class="stat-value">${avg.toFixed(1)}</div><div class="stat-sub">Tuần hiện tại</div></div><div class="stat"><div class="stat-label">Xếp loại Tốt</div><div class="stat-value">${good}</div><div class="stat-sub">Từ 90 điểm</div></div><div class="stat"><div class="stat-label">Chờ xem xét</div><div class="stat-value">${pending}</div><div class="stat-sub">Cần GVCN xử lý</div></div><div class="stat"><div class="stat-label">Trạng thái</div><div class="stat-value" style="font-size:19px">${locked()?"ĐÃ CHỐT":"ĐANG MỞ"}</div><div class="stat-sub">${locked()?"Không ghi thêm điểm":"Có thể ghi nhận"}</div></div></section><section class="grid"><div class="card"><div class="cardhead"><div><div class="title">Bảng xếp hạng</div><div class="sub">${esc(weekLabel(state.week))}</div></div><div class="actions" style="margin:0"><button class="btn small light no-print" data-action="csv">Xuất CSV</button><button class="btn small light no-print" data-action="print">In</button></div></div><div class="toolbar no-print"><div class="search"><input id="search" class="input" value="${esc(state.search)}" placeholder="🔎 Tìm mã hoặc tên học sinh"></div><select id="group" class="select" style="width:160px"><option value="all">Tất cả tổ</option>${groupList().map(g=>`<option value="${esc(g.id)}" ${String(state.group)===String(g.id)?"selected":""}>Tổ ${esc(g.name||g.id)}</option>`).join("")}</select></div><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Học sinh</th><th>Tổ</th><th>Cộng</th><th>Trừ</th><th>Điểm</th><th>Xếp loại</th><th class="no-print"> </th></tr></thead><tbody>${vis.length?vis.map((r,i)=>{const [g,cls]=grade(r.score);return `<tr><td><strong>${i+1}</strong></td><td><div class="person"><div class="personava">${initials(r.st.name)}</div><div><div style="font-weight:900">${esc(r.st.name)}</div><div class="muted tiny">${esc(r.st.id)}</div></div></div></td><td>Tổ ${esc(r.st.group)}</td><td style="color:#047857;font-weight:900">+${r.plus}</td><td style="color:#be123c;font-weight:900">−${r.minus}</td><td><span class="score ${r.score>=90?"g":r.score>=65?"w":"b"}">${r.score}</span></td><td><span class="grade ${cls}">${g}</span>${r.pending?`<div class="tiny" style="margin-top:3px;color:#92400e">${r.pending} chờ</div>`:""}</td><td class="no-print"><button class="btn small gray" data-action="detail:${r.st.id}">Chi tiết</button></td></tr>`}).join(""):"<tr><td colspan='8' class='empty'>Chưa có học sinh.</td></tr>"}</tbody></table></div></div><div class="card"><div class="cardhead"><div><div class="title">Top tuần</div><div class="sub">Theo điểm hiện tại</div></div></div><div class="pad"><div class="list">${vis.slice(0,7).map((r,i)=>`<div class="item"><div class="itemrow"><div class="rank">${i+1}</div><div class="grow"><div class="fw">${esc(r.st.name)}</div><div class="tiny muted">Tổ ${esc(r.st.group)}</div></div><strong>${r.score}</strong></div></div>`).join("")||'<div class="empty">Chưa có dữ liệu.</div>'}</div><div class="sectionline"></div><div class="notice">Quy trình: tổ trưởng ghi nhận → trường hợp chưa rõ để “Chờ GVCN” → GVCN kiểm tra → chốt tuần.</div></div></div></section>`}
 function recordsPage(){const rs=Object.values(state.records).filter(r=>r.week===state.week&&r.status!=="deleted"&&scopeStudent(state.students[r.studentId])).sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));return `<h2 class="page-title">Nhật ký ghi nhận</h2><p class="page-sub">Các ghi nhận đang còn hiệu lực. Bản ghi đã xóa chỉ được lưu trong Audit.</p><div class="actions no-print"><button class="btn green" data-action="plus" ${canWriteRecord("plus")?"":"disabled"}>＋ Điểm cộng</button><button class="btn red" data-action="minus" ${canWriteRecord("minus")?"":"disabled"}>− Điểm trừ</button></div><div class="card" style="margin-top:12px"><div class="pad"><div class="recordlist">${rs.length?rs.map(recordCard).join(""):"<div class='empty'>Chưa có ghi nhận trong tuần này.</div>"}</div></div></div>`}
 function canEditRecord(r){if(!state.user||!isStaff()||locked()||r?.status==="deleted")return false;if(isGvcn())return true;if(r.status==="rejected")return false;return r.createdByUid===state.user.uid&&roleCan(r?.type)&&canGradeStudent(state.students[r.studentId])}
 function canDeleteRecord(r){return canEditRecord(r)}
@@ -193,6 +263,233 @@ function toastAction(msg,label,fn){const e=document.createElement("div");e.class
 async function editRecord(rid){const r=state.records[rid];if(!r||!canEditRecord(r))return toast("Bạn không có quyền sửa bản ghi này hoặc tuần đã chốt.","err");recordModal(r.type,{record:r})}
 async function deleteRecord(rid){const r=state.records[rid];if(!r||!canDeleteRecord(r))return toast("Bạn không có quyền xóa bản ghi này hoặc tuần đã chốt.","err");const currentStudent=state.students[r.studentId];if(!confirm(`Xóa ghi nhận của ${currentStudent?.name||r.studentId}: ${r.kind} (${r.points>0?"+":"−"}${Math.abs(r.points)})?`))return;const snapshot=JSON.parse(JSON.stringify(r));const deleted={...r,status:"deleted",deletedAt:Date.now(),deletedByUid:state.user.uid,deletedByName:state.profile?.name||"",previousData:snapshot,updatedAt:Date.now()};if(!(await dbSet(`records/${rid}`,deleted)))return toast(firebaseErrMsg("Không xóa được Firebase."),"err");state.records[rid]=deleted;state.lastDeleted={record:snapshot,expiresAt:Date.now()+12000};await writeAudit("DELETE",deleted,{before:snapshot,after:deleted});renderApp();toastAction("Đã xóa ghi nhận.","Hoàn tác",async()=>{if(!state.lastDeleted||state.lastDeleted.expiresAt<Date.now())return toast("Đã hết thời gian hoàn tác.","err");const restored={...state.lastDeleted.record,status:state.lastDeleted.record.status==="deleted"?"approved":state.lastDeleted.record.status,deletedAt:null,deletedByUid:null,deletedByName:null,previousData:null,updatedAt:Date.now()};if(!(await dbSet(`records/${restored.id}`,restored)))return toast("Không thể hoàn tác trên Firebase.","err");state.records[restored.id]=restored;await writeAudit("RESTORE",restored,{before:deleted,after:restored,restored:true});state.lastDeleted=null;renderApp();toast("Đã hoàn tác bản ghi.","ok")})}
 function studentsPage(){const list=Object.values(state.students).sort(compareStudentsByGroup);return `<h2 class="page-title">Học sinh</h2><p class="page-sub">Danh sách lớp dùng đúng thứ tự: <strong>Mã học sinh · Họ và tên · Tổ</strong>; bảng được sắp theo tổ, rồi theo mã học sinh.</p>${isGvcn()?`<div class="actions no-print"><button class="btn blue" data-action="edit-roster">✎ Sửa danh sách</button><button class="btn light" data-action="csv-students">Xuất danh sách</button></div>`:""}<div class="card" style="margin-top:12px"><div class="tablewrap"><table class="table"><thead><tr><th>Mã học sinh</th><th>Họ và tên</th><th>Tổ</th><th>Trạng thái</th></tr></thead><tbody>${list.length?list.map(s=>`<tr><td>${esc(s.id)}</td><td style="font-weight:900">${esc(s.name)}</td><td>Tổ ${esc(s.group)}</td><td><span class="statusbadge ${s.active===false?"off":"on"}">${s.active===false?"Đã ẩn":"Đang học"}</span></td></tr>`).join(""):"<tr><td colspan='4' class='empty'>Chưa có học sinh.</td></tr>"}</tbody></table></div></div>`}
+function weedingPage(){
+  const all=weedingItemsList(),vis=visibleWeedingItems(),canManage=canManageWeeding();
+  const carriedCount=all.filter(isWeedingCarriedOver).length;
+  const groupCount=new Set(all.map(x=>String(x.studentGroup)).filter(Boolean)).size;
+  const mgrs=activeWeedingManagers();
+  return `<section class="hero weeding-hero">${state.weedingError?`<div class="warning no-print" style="margin-bottom:10px">${esc(weedingErrMsg(state.weedingError))} <button class="btn small light" data-action="retry-sync">Thử lại</button></div>`:""}<div class="eyebrow"><span class="pill soft">🌿 Lưu liên tục qua các tuần</span><span class="pill ${canManage?"green":"soft"}">${isGvcn()?"✓ GVCN · Toàn quyền":canManage?"✓ Bạn được giao quản lý":"Chỉ xem"}</span><span class="pill soft">${all.length} thành viên trong danh sách</span></div><h1>Danh sách nhổ cỏ · ${esc(state.config?.className||"")}</h1><p>Thành viên được thêm vào danh sách sẽ <strong>tự động giữ nguyên khi hết tuần hoặc khi tuần đã chốt</strong>, và chỉ rời danh sách khi người quản lý xóa.</p><div class="actions no-print">${canManage?`<button class="btn green" data-action="weeding-add">＋ Thêm thành viên</button>`:""}${isGvcn()?`<button class="btn violet" data-action="weeding-managers">⚙ Chọn tài khoản quản lý</button>`:""}${all.length?`<button class="btn light" data-action="csv-weeding">Xuất CSV</button><button class="btn light" data-action="print">In danh sách</button>`:""}${canManage&&all.length>1?`<button class="btn red" data-action="weeding-clear-all">🗑 Xóa tất cả</button>`:""}</div></section>
+  <section class="stats stats-4">
+    <div class="stat"><div class="stat-label">Đang trong danh sách</div><div class="stat-value">${all.length}</div><div class="stat-sub">Chỉ mất khi được xóa</div></div>
+    <div class="stat"><div class="stat-label">Từ tuần trước giữ lại</div><div class="stat-value">${carriedCount}</div><div class="stat-sub">Không reset khi sang tuần mới</div></div>
+    <div class="stat"><div class="stat-label">Số tổ có thành viên</div><div class="stat-value">${groupCount}</div><div class="stat-sub">Trên tổng ${groupList().length} tổ</div></div>
+    <div class="stat"><div class="stat-label">Tài khoản quản lý</div><div class="stat-value">${1+mgrs.length}</div><div class="stat-sub" title="${esc(weedingManagerSummaryText())}">${esc(weedingManagerSummaryText())}</div></div>
+  </section>
+  <div class="card" style="margin-top:14px">
+    <div class="cardhead">
+      <div><div class="title">Thành viên cần nhổ cỏ</div><div class="sub">Phụ trách quản lý: ${esc(weedingManagerSummaryText())}</div></div>
+      <div class="actions no-print" style="margin:0">${isGvcn()?`<button class="btn small light" data-action="weeding-managers">⚙ Đổi người quản lý</button>`:""}${canManage?`<button class="btn small green" data-action="weeding-add">＋ Thêm</button>`:""}</div>
+    </div>
+    <div class="toolbar no-print">
+      <div class="search"><input id="weeding-search" class="input" value="${esc(state.weedingSearch)}" placeholder="🔎 Tìm mã, họ tên học sinh hoặc lý do"></div>
+      <select id="weeding-group" class="select" style="width:160px"><option value="all">Tất cả tổ</option>${groupList().map(g=>`<option value="${esc(g.id)}" ${String(state.weedingGroup)===String(g.id)?"selected":""}>Tổ ${esc(g.name||g.id)}</option>`).join("")}</select>
+    </div>
+    <div class="tablewrap">
+      <table class="table">
+        <thead><tr><th>#</th><th>Học sinh</th><th>Tổ</th><th>Lý do / Ghi chú</th><th>Ngày thêm</th>${canManage?`<th class="no-print">Thao tác</th>`:""}</tr></thead>
+        <tbody>${vis.length?vis.map((item,i)=>{const carried=isWeedingCarriedOver(item);return `<tr><td><strong>${i+1}</strong></td><td><div class="person"><div class="personava">${initials(item.studentName)}</div><div><div style="font-weight:900">${esc(item.studentName)}</div><div class="muted tiny">${esc(item.studentId)}</div></div></div></td><td>Tổ ${esc(item.studentGroup)}</td><td><div>${item.note?esc(item.note):`<span class="muted">Không có ghi chú</span>`}</div></td><td><div class="fw">${esc(formatDateVi(item.addedDate,item.addedAt))} ${carried?`<span class="grade warn" style="margin-left:4px;padding:3px 7px">Từ tuần trước</span>`:""}</div><div class="tiny muted">Thêm bởi: ${esc(item.addedByName||"Quản lý")}${item.updatedByName&&item.updatedAt?` • Sửa: ${esc(item.updatedByName)}`:""}</div></td>${canManage?`<td class="no-print"><div class="actions" style="margin:0"><button class="btn small light" data-action="weeding-edit:${esc(item.id)}">✎ Sửa</button><button class="btn small light dangerline" data-action="weeding-remove:${esc(item.id)}">🗑 Xóa</button></div></td>`:""}</tr>`}).join(""):`<tr><td colspan="${canManage?6:5}" class="empty">${all.length?"Không tìm thấy thành viên phù hợp với bộ lọc.":"Hiện chưa có thành viên nào trong danh sách nhổ cỏ."}</td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function weedingAddModal(){
+  if(!canManageWeeding())return toast("Bạn không có quyền quản lý danh sách nhổ cỏ.","err");
+  const students=Object.values(state.students).filter(s=>s&&s.active!==false).sort(compareStudentsByGroup);
+  if(!students.length)return toast("Chưa có danh sách học sinh.","err");
+  const existingIds=new Set(weedingItemsList().map(x=>String(x.studentId)));
+  const today=localDateIso();
+  const chips=WEEDING_QUICK_NOTES.map(n=>`<button type="button" class="btn small gray wd-chip" data-note="${esc(n)}">${esc(n)}</button>`).join("");
+  const optionsHtml=students.map(s=>{
+    const already=existingIds.has(String(s.id));
+    return `<label class="weeding-option ${already?"is-existing":""}" data-search="${esc(`${s.id} ${s.name}`.toLowerCase())}" data-group="${esc(s.group)}"><input type="checkbox" class="wd-pick-cb" value="${esc(s.id)}" ${already?"disabled":""}><div class="personava" style="width:30px;height:30px;font-size:10px">${initials(s.name)}</div><div class="grow"><div class="fw">${esc(s.name)}</div><div class="tiny muted">${esc(s.id)} • Tổ ${esc(s.group)}</div></div>${already?`<span class="grade ok">Đã có trong DS</span>`:""}</label>`;
+  }).join("");
+  openModal("Thêm thành viên nhổ cỏ",`<form id="weeding-add-form"><div class="notice">Chọn một hoặc nhiều học sinh để thêm vào danh sách nhổ cỏ. Thành viên sẽ <strong>vẫn được lưu khi hết tuần</strong> và chỉ rời danh sách khi được xóa.</div><div class="toolbar" style="padding:10px 0 8px;border-bottom:0"><div class="search"><input id="wd-pick-search" class="input" placeholder="🔎 Tìm tên hoặc mã học sinh..."></div><select id="wd-pick-group" class="select" style="width:150px"><option value="all">Tất cả tổ</option>${groupList().map(g=>`<option value="${esc(g.id)}">Tổ ${esc(g.name||g.id)}</option>`).join("")}</select></div><div class="weeding-picker-bar"><span id="wd-pick-count" class="tiny fw">Đã chọn: 0 học sinh</span><button type="button" id="wd-pick-clear" class="btn small light">Bỏ chọn</button></div><div id="wd-pick-list" class="weeding-picker">${optionsHtml}</div><div class="formgrid" style="margin-top:12px"><label class="field"><span class="label">Ngày thêm</span><input id="wd-date" class="input" type="date" value="${esc(today)}" required></label><label class="field"><span class="label">Lý do / Ghi chú (tuỳ chọn)</span><input id="wd-note" class="input" maxlength="200" placeholder="Ví dụ: Đi học muộn, không trực nhật..."></label></div><div class="weeding-chips" style="margin-top:8px">${chips}</div><div class="actions" style="justify-content:flex-end;margin-top:14px"><button class="btn light" type="button" data-action="close">Hủy</button><button id="wd-submit" class="btn green" type="submit">＋ Thêm vào danh sách</button></div></form>`);
+  const searchEl=$('#wd-pick-search'),groupEl=$('#wd-pick-group'),countEl=$('#wd-pick-count'),submitEl=$('#wd-submit'),noteEl=$('#wd-note');
+  const applyFilter=()=>{
+    const q=String(searchEl?.value||"").trim().toLowerCase(),g=String(groupEl?.value||"all");
+    $$('#wd-pick-list .weeding-option').forEach(el=>{
+      const okG=g==="all"||String(el.dataset.group)===g;
+      const okQ=!q||String(el.dataset.search||"").includes(q);
+      el.style.display=(okG&&okQ)?"":"none";
+    });
+  };
+  const syncCount=()=>{
+    const n=$$('#wd-pick-list .wd-pick-cb:checked').length;
+    if(countEl)countEl.textContent=`Đã chọn: ${n} học sinh`;
+    if(submitEl)submitEl.textContent=n?`＋ Thêm ${n} thành viên`:"＋ Thêm vào danh sách";
+  };
+  searchEl?.addEventListener('input',applyFilter);
+  groupEl?.addEventListener('change',applyFilter);
+  $$('#wd-pick-list .wd-pick-cb').forEach(cb=>cb.addEventListener('change',syncCount));
+  $('#wd-pick-clear')?.addEventListener('click',()=>{$$('#wd-pick-list .wd-pick-cb:checked').forEach(cb=>cb.checked=false);syncCount()});
+  $$('#weeding-add-form .wd-chip').forEach(btn=>btn.addEventListener('click',()=>{if(!noteEl)return;const txt=btn.dataset.note||"";noteEl.value=noteEl.value.trim()&&!noteEl.value.includes(txt)?`${noteEl.value.trim()}, ${txt}`:txt;noteEl.focus()}));
+  $('#weeding-add-form').onsubmit=async e=>{
+    e.preventDefault();
+    const chosenIds=$$('#wd-pick-list .wd-pick-cb:checked').map(cb=>cb.value);
+    if(!chosenIds.length)return toast("Hãy chọn ít nhất một học sinh.","err");
+    const addedDate=$('#wd-date').value||localDateIso();
+    const addedWeek=mkWeek(new Date(addedDate+"T12:00:00"));
+    const note=String(noteEl?.value||"").trim();
+    const currentIds=new Set(weedingItemsList().map(x=>String(x.studentId)));
+    const toAdd=chosenIds.filter(sid=>!currentIds.has(String(sid))&&state.students[sid]&&state.students[sid].active!==false);
+    if(!toAdd.length)return toast("Các học sinh đã chọn đều đã có trong danh sách nhổ cỏ.","err");
+    if(submitEl){submitEl.disabled=true;submitEl.textContent="Đang thêm..."}
+    let addedCount=0;
+    const baseTs=Date.now();
+    for(let i=0;i<toAdd.length;i++){
+      const sid=toAdd[i],st=state.students[sid];
+      const wid=`wd_${id()}`;
+      const item={id:wid,studentId:st.id,studentName:st.name,studentGroup:String(st.group),note,addedDate,addedWeek,addedAt:baseTs+i,addedByUid:state.user.uid,addedByName:state.profile?.name||state.profile?.username||""};
+      if(!(await dbSet(`${PATH.weeding}/items/${wid}`,item))){
+        if(submitEl){submitEl.disabled=false;syncCount()}
+        return toast(weedingErrMsg(state.syncError,"Không thể lưu vào Firebase."),"err");
+      }
+      if(!state.weeding)state.weeding={managers:{},items:{}};
+      if(!state.weeding.items)state.weeding.items={};
+      state.weeding.items[wid]=item;
+      addedCount++;
+      await writeAudit("WEEDING_ADD",{id:wid,week:state.week,studentId:st.id,studentGroup:String(st.group)},{note,after:item});
+    }
+    saveLocal();
+    closeModal();
+    renderApp();
+    toast(addedCount===1?`Đã thêm ${state.students[toAdd[0]]?.name||toAdd[0]} vào danh sách nhổ cỏ.`:`Đã thêm ${addedCount} thành viên vào danh sách nhổ cỏ.`,"ok");
+  };
+}
+function weedingEditModal(wid){
+  if(!canManageWeeding())return toast("Bạn không có quyền chỉnh sửa danh sách nhổ cỏ.","err");
+  const item=weedingItemsMap()[wid];
+  if(!item)return toast("Không tìm thấy thành viên trong danh sách.","err");
+  const stName=state.students?.[item.studentId]?.name||item.studentName||item.studentId;
+  const stGroup=state.students?.[item.studentId]?.group??item.studentGroup??"";
+  const chips=WEEDING_QUICK_NOTES.map(n=>`<button type="button" class="btn small gray wd-chip" data-note="${esc(n)}">${esc(n)}</button>`).join("");
+  openModal(`Sửa thông tin · ${esc(stName)}`,`<form id="weeding-edit-form"><div class="notice"><strong>${esc(stName)}</strong> • Mã ${esc(item.studentId)} • Tổ ${esc(stGroup)}</div><div class="formgrid" style="margin-top:10px"><label class="field"><span class="label">Ngày thêm</span><input id="wde-date" class="input" type="date" value="${esc(item.addedDate||localDateIso(new Date(item.addedAt||Date.now())))}" required></label><label class="field"><span class="label">Lý do / Ghi chú</span><input id="wde-note" class="input" maxlength="200" value="${esc(item.note||"")}" placeholder="Nhập lý do hoặc ghi chú..."></label></div><div class="weeding-chips" style="margin-top:8px">${chips}</div><div class="actions" style="justify-content:flex-end;margin-top:14px"><button class="btn light" type="button" data-action="close">Hủy</button><button class="btn dark" type="submit">Lưu thay đổi</button></div></form>`);
+  const noteEl=$('#wde-note');
+  $$('#weeding-edit-form .wd-chip').forEach(btn=>btn.addEventListener('click',()=>{if(!noteEl)return;const txt=btn.dataset.note||"";noteEl.value=noteEl.value.trim()&&!noteEl.value.includes(txt)?`${noteEl.value.trim()}, ${txt}`:txt;noteEl.focus()}));
+  $('#weeding-edit-form').onsubmit=async e=>{
+    e.preventDefault();
+    const addedDate=$('#wde-date').value||item.addedDate||localDateIso();
+    const addedWeek=mkWeek(new Date(addedDate+"T12:00:00"));
+    const note=String(noteEl?.value||"").trim();
+    const before=JSON.parse(JSON.stringify(item));
+    const next={...item,studentName:stName,studentGroup:String(stGroup),note,addedDate,addedWeek,updatedAt:Date.now(),updatedByUid:state.user.uid,updatedByName:state.profile?.name||state.profile?.username||""};
+    if(!(await dbSet(`${PATH.weeding}/items/${wid}`,next)))return toast(weedingErrMsg(state.syncError,"Không cập nhật được Firebase."),"err");
+    state.weeding.items[wid]=next;
+    saveLocal();
+    await writeAudit("WEEDING_UPDATE",{id:wid,week:state.week,studentId:item.studentId,studentGroup:String(stGroup)},{before,after:next});
+    closeModal();
+    renderApp();
+    toast("Đã cập nhật thông tin nhổ cỏ.","ok");
+  };
+}
+async function weedingRemove(wid){
+  if(!canManageWeeding())return toast("Bạn không có quyền xóa thành viên khỏi danh sách nhổ cỏ.","err");
+  const item=weedingItemsMap()[wid];
+  if(!item)return toast("Không tìm thấy thành viên trong danh sách.","err");
+  const stName=state.students?.[item.studentId]?.name||item.studentName||item.studentId;
+  const stGroup=state.students?.[item.studentId]?.group??item.studentGroup??"";
+  if(!confirm(`Xóa ${stName} (Tổ ${stGroup}) khỏi danh sách nhổ cỏ?`))return;
+  const snapshot=JSON.parse(JSON.stringify(item));
+  if(!(await dbSet(`${PATH.weeding}/items/${wid}`,null)))return toast(weedingErrMsg(state.syncError,"Không xóa được trên Firebase."),"err");
+  delete state.weeding.items[wid];
+  state.lastDeletedWeeding={item:snapshot,expiresAt:Date.now()+12000};
+  saveLocal();
+  await writeAudit("WEEDING_REMOVE",{id:wid,week:state.week,studentId:item.studentId,studentGroup:String(stGroup)},{before:snapshot,after:null});
+  renderApp();
+  toastAction(`Đã xóa ${stName} khỏi danh sách nhổ cỏ.`,"Hoàn tác",async()=>{
+    if(!state.lastDeletedWeeding||state.lastDeletedWeeding.expiresAt<Date.now())return toast("Đã hết thời gian hoàn tác.","err");
+    const restored={...state.lastDeletedWeeding.item,addedByUid:isGvcn()?state.lastDeletedWeeding.item.addedByUid:state.user.uid,updatedAt:Date.now(),updatedByUid:state.user.uid,updatedByName:state.profile?.name||""};
+    if(!(await dbSet(`${PATH.weeding}/items/${restored.id}`,restored)))return toast(weedingErrMsg(state.syncError,"Không thể hoàn tác trên Firebase."),"err");
+    if(!state.weeding.items)state.weeding.items={};
+    state.weeding.items[restored.id]=restored;
+    state.lastDeletedWeeding=null;
+    saveLocal();
+    await writeAudit("WEEDING_RESTORE",{id:restored.id,week:state.week,studentId:restored.studentId,studentGroup:String(restored.studentGroup||"")},{before:null,after:restored});
+    renderApp();
+    toast(`Đã hoàn tác ${stName} vào danh sách nhổ cỏ.`,"ok");
+  });
+}
+async function weedingClearAll(){
+  if(!canManageWeeding())return toast("Bạn không có quyền xóa danh sách nhổ cỏ.","err");
+  const list=weedingItemsList();
+  if(!list.length)return;
+  if(!confirm(`Xóa toàn bộ ${list.length} thành viên khỏi danh sách nhổ cỏ?\n\nHành động này sẽ làm trống danh sách hiện tại.`))return;
+  for(const item of list){
+    if(!(await dbSet(`${PATH.weeding}/items/${item.id}`,null)))return toast(weedingErrMsg(state.syncError,"Không xóa hết được trên Firebase."),"err");
+    delete state.weeding.items[item.id];
+  }
+  saveLocal();
+  await writeAudit("WEEDING_REMOVE",{id:"all",week:state.week},{targetType:"weeding",targetId:"all",before:{count:list.length,names:list.map(x=>x.studentName)},after:{count:0},note:`Đã xóa toàn bộ ${list.length} thành viên nhổ cỏ`});
+  renderApp();
+  toast(`Đã xóa toàn bộ ${list.length} thành viên khỏi danh sách nhổ cỏ.`,"ok");
+}
+function renderWeedingManagerOptions(cbClass){
+  const cur=weedingManagersMap();
+  const accounts=Object.values(state.users||{}).filter(u=>u&&u.role!=="gvcn").sort((a,b)=>(a.username==="HOCSINH"?1:0)-(b.username==="HOCSINH"?1:0)||userRoleLabel(a).localeCompare(userRoleLabel(b),"vi")||String(a.name||"").localeCompare(String(b.name||""),"vi"));
+  if(!accounts.length)return `<div class="empty">Chưa có tài khoản nào ngoài GVCN.</div>`;
+  return `<div class="weeding-mgr-grid">${accounts.map(u=>{
+    const checked=cur[u.uid]?.active===true;
+    return `<label class="weeding-mgr-item ${checked?"is-selected":""}"><input type="checkbox" class="${cbClass}" value="${esc(u.uid)}" ${checked?"checked":""}><div class="avatar">${initials(u.name)}</div><div class="grow"><div class="fw">${esc(u.name||u.username)}</div><div class="tiny muted">${esc(userRoleLabel(u))}${u.group?` • Tổ ${esc(u.group)}`:""}${u.username==="HOCSINH"?" • Tài khoản dùng chung":""}</div></div><span class="accountbadge">${esc(u.username)}</span>${u.active===false?`<span class="statusbadge off">Khóa</span>`:""}</label>`;
+  }).join("")}</div>`;
+}
+function weedingManagersCard(){
+  const count=weedingItemsList().length,mgrs=activeWeedingManagers();
+  return `<div class="card" style="margin-bottom:14px"><div class="cardhead"><div><div class="title">Quản lý danh sách nhổ cỏ</div><div class="sub">GVCN chọn tài khoản được phép thêm, sửa và xóa thành viên danh sách nhổ cỏ</div></div><button class="btn small light no-print" data-action="open-weeding">🌿 Mở danh sách (${count})</button></div><div class="pad">${state.weedingError?`<div class="warning" style="margin-bottom:10px">${esc(weedingErrMsg(state.weedingError))}</div>`:""}<div class="notice" style="margin-bottom:10px"><strong>GVCN luôn có quyền quản lý.</strong> Tài khoản được chọn bên dưới có thể thêm và xóa thành viên trong danh sách nhổ cỏ bất kỳ lúc nào (vẫn giữ qua các tuần và kể cả khi tuần đã chốt).${mgrs.length?`<br>Đang chọn: <strong>${esc(mgrs.map(m=>`${m.name} (${m.username})`).join(", "))}</strong>.`:`<br>Hiện chỉ có <strong>GVCN</strong> quản lý danh sách này.`}</div>${renderWeedingManagerOptions("wm-card-cb")}<div class="actions"><button class="btn dark" data-action="save-weeding-managers">Lưu tài khoản quản lý</button></div></div></div>`;
+}
+function weedingManagersModal(){
+  if(!isGvcn())return toast("Chỉ GVCN được chọn tài khoản quản lý danh sách nhổ cỏ.","err");
+  openModal("Chọn tài khoản quản lý danh sách nhổ cỏ",`<div class="notice" style="margin-bottom:10px">GVCN luôn có toàn quyền. Chọn thêm một hoặc nhiều tài khoản được phép <strong>thêm, sửa ghi chú và xóa thành viên</strong> trong danh sách nhổ cỏ.</div>${renderWeedingManagerOptions("wm-modal-cb")}<div class="actions" style="justify-content:flex-end;margin-top:14px"><button class="btn light" type="button" data-action="close">Hủy</button><button id="wm-modal-save" class="btn dark" type="button">Lưu phân công</button></div>`);
+  $$('#modal .wm-modal-cb').forEach(cb=>cb.addEventListener('change',()=>{cb.closest('.weeding-mgr-item')?.classList.toggle('is-selected',cb.checked)}));
+  $('#wm-modal-save')?.addEventListener('click',()=>{
+    const uids=$$('#modal .wm-modal-cb:checked').map(cb=>cb.value);
+    saveWeedingManagers(uids,true);
+  });
+}
+async function saveWeedingManagers(selectedUids,fromModal=false){
+  if(!isGvcn())return toast("Chỉ GVCN được thay đổi quyền quản lý danh sách nhổ cỏ.","err");
+  const prev=weedingManagersMap(),next={};
+  const now=Date.now();
+  for(const uid of selectedUids){
+    const u=state.users?.[uid];
+    if(!u||u.role==="gvcn")continue;
+    next[uid]={uid,username:u.username||"",name:u.name||u.username||"",roleLabel:userRoleLabel(u),active:true,assignedAt:prev[uid]?.assignedAt||now,assignedByUid:state.user.uid};
+  }
+  const payload=Object.keys(next).length?next:null;
+  if(!(await dbSet(`${PATH.weeding}/managers`,payload)))return toast(weedingErrMsg(state.syncError,"Không lưu được phân công lên Firebase."),"err");
+  const verify=await dbGet(`${PATH.weeding}/managers`);
+  const saved=verify.exists()?verify.val()||{}:{};
+  if(!state.weeding)state.weeding={managers:{},items:{}};
+  state.weeding.managers=saved;
+  state.weedingError=null;
+  saveLocal();
+  const names=Object.values(saved).map(m=>`${m.name} (${m.username})`);
+  await writeAudit("WEEDING_MANAGERS",{id:"managers",week:state.week},{before:prev,after:saved,note:names.length?`Giao quản lý nhổ cỏ: ${names.join(", ")}`:"Chỉ GVCN quản lý danh sách nhổ cỏ"});
+  if(fromModal)closeModal();
+  renderApp();
+  toast(names.length?`Đã cập nhật quản lý nhổ cỏ: ${names.join(", ")}.`:"Đã cập nhật: chỉ GVCN quản lý danh sách nhổ cỏ.","ok");
+}
+async function syncWeedingManagerMeta(uid,userObj){
+  if(!isGvcn()||!uid||!weedingManagersMap()[uid])return;
+  if(!userObj){
+    if(await dbSet(`${PATH.weeding}/managers/${uid}`,null)){
+      delete state.weeding.managers[uid];
+      saveLocal();
+    }
+    return;
+  }
+  const cur=weedingManagersMap()[uid];
+  const updated={...cur,uid,username:userObj.username||cur.username||"",name:userObj.name||userObj.username||cur.name||"",roleLabel:userRoleLabel(userObj),active:true};
+  if(JSON.stringify(cur)!==JSON.stringify(updated)){
+    if(await dbSet(`${PATH.weeding}/managers/${uid}`,updated)){
+      state.weeding.managers[uid]=updated;
+      saveLocal();
+    }
+  }
+}
+function exportWeedingCsv(){
+  const d=[["STT","Mã HS","Họ và tên","Tổ","Lý do / Ghi chú","Ngày thêm","Người thêm"],...visibleWeedingItems().map((x,i)=>[i+1,x.studentId,x.studentName,x.studentGroup,x.note||"",formatDateVi(x.addedDate,x.addedAt),x.addedByName||""])];
+  download(csvFromRows(d),`danh-sach-nho-co-${state.config?.className||"lop"}-${localDateIso()}.csv`,`text/csv;charset=utf-8`);
+}
 function rulesPage(){return `<h2 class="page-title">Quy chế thi đua</h2><p class="page-sub">Hiển thị trực tiếp thang điểm của lớp ${esc(state.config?.className||"")}.</p><div class="grid"><div class="card"><div class="cardhead"><div class="title">Điểm trừ</div></div><div class="pad">${RULES_MINUS.map(x=>`<div class="item" style="margin-bottom:7px"><div class="itemrow"><div class="grow">${esc(x[0])}</div><strong style="color:#be123c">${x[1]===null?"−5 đến −10":x[1]}</strong></div></div>`).join("")}</div></div><div class="card"><div class="cardhead"><div class="title">Điểm cộng</div></div><div class="pad">${RULES_PLUS.map(x=>`<div class="item" style="margin-bottom:7px"><div class="itemrow"><div class="grow">${esc(x[0])}</div><strong style="color:#047857">+${x[1]}</strong></div></div>`).join("")}<div class="sectionline"></div><div class="success">Điểm cộng tối đa: +10 điểm/tuần.</div><div class="notice" style="margin-top:8px">Điểm cuối tuần = 100 + điểm cộng − điểm trừ; tối đa 100 điểm.</div><div class="warning" style="margin-top:8px">Học sinh ốm/điều trị/nằm viện có phép và căn cứ phù hợp thì không trừ. Được GV cho phép dùng điện thoại phục vụ học tập thì không tính vi phạm.</div></div></div></div>`}
 function reportsPage(){const rs=Object.values(state.reports).sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));return `<h2 class="page-title">Phản ánh ẩn danh</h2><p class="page-sub">Chỉ GVCN xem được hộp thư này. Người gửi không cần tài khoản.</p><div class="card"><div class="pad"><div class="recordlist">${rs.length?rs.map(r=>`<div class="record ${r.status==='new'?"pending":""}"><div class="recrow"><div class="recicon" style="background:#ede9fe;color:#6d28d9">📣</div><div class="grow"><div class="fw">${esc(r.category||"Phản ánh")}</div><div class="recmeta">${r.target?`Đối tượng: ${esc(r.target)}<br>`:""}${esc(r.content)}<br>${new Date(Number(r.createdAt||Date.now())).toLocaleString("vi-VN")} • ${r.status==='new'?"Mới":"Đã xử lý"}</div></div></div>${r.status==='new'?`<div class="recactions no-print"><button class="btn small green" data-action="handle-report:${r.id}">✓ Đã xử lý</button><button class="btn small light" data-action="report-record:${r.id}">Tạo ghi nhận</button></div>`:""}</div>`).join(""):"<div class='empty'>Chưa có phản ánh.</div>"}</div></div></div>`}
 function accountForm(uid){
@@ -263,7 +560,7 @@ function accountForm(uid){
         const before={...existing},next={...existing,name,role,positionId,group};
         if(!(await dbSet(`users/${uid}`,next)))return toast(firebaseErrMsg("Không cập nhật được tài khoản."),"err");
         const verify=await dbGet(`users/${uid}`);if(!verify.exists())return toast("Không xác minh được sau khi lưu.","err");
-        state.users[uid]={...verify.val(),uid};await writeSystemAudit("UPDATE","user",uid,before,state.users[uid]);closeModal();renderApp();toast("Đã cập nhật tài khoản.","ok");return;
+        state.users[uid]={...verify.val(),uid};await syncWeedingManagerMeta(uid,state.users[uid]);await writeSystemAudit("UPDATE","user",uid,before,state.users[uid]);closeModal();renderApp();toast("Đã cập nhật tài khoản.","ok");return;
       }
       if(Object.values(state.users).some(u=>String(u.username||"").toUpperCase()===username))return toast("Tên đăng nhập đã tồn tại.","err");
       const password=$('#ac-pass').value, password2=$('#ac-pass2').value;
@@ -300,10 +597,11 @@ function managePage(){
   const audits=Object.values(state.audit).sort((a,b)=>Number(b.at||0)-Number(a.at||0)).slice(0,18);
   const gvcnName=state.profile?.name||'GVCN';
   const roleAccounts=[['GVCN','gvcn'],['Lớp trưởng','lopTruong'],['Lớp phó','lopPho'],['Tổ trưởng','toTruong'],['Tổ phó','toPho'],['HOCSINH','student'],...customRoleDefs().map(d=>[d.name,d.id])];
-  const auditLabel=a=>a.action==='RESET_PASSWORD'?'🔑 Đổi mật khẩu':a.action==='delete'?'🗑 Xóa':a.action==='undo-delete'?'↶ Hoàn tác':a.action==='edit'?'✎ Sửa':a.action==='approve'?'✓ Duyệt':a.action==='reject'?'⊘ Bỏ':'• Cập nhật';
+  const weedingCount=weedingItemsList().length;
+  const auditLabel=a=>a.action==='RESET_PASSWORD'?'🔑 Đổi mật khẩu':a.action==='WEEDING_ADD'?'🌿 Thêm nhổ cỏ':a.action==='WEEDING_UPDATE'?'🌿 Sửa nhổ cỏ':a.action==='WEEDING_REMOVE'?'🗑 Xóa nhổ cỏ':a.action==='WEEDING_RESTORE'?'↶ Hoàn tác nhổ cỏ':a.action==='WEEDING_MANAGERS'?'⚙ Quản lý nhổ cỏ':a.action==='delete'||a.action==='DELETE'?'🗑 Xóa':a.action==='undo-delete'||a.action==='RESTORE'?'↶ Hoàn tác':a.action==='edit'?'✎ Sửa':a.action==='approve'?'✓ Duyệt':a.action==='reject'?'⊘ Bỏ':'• Cập nhật';
   const auditDetail=a=>{
-    const from=a.fromStudentName&&a.toStudentName&&a.fromStudentName!==a.toStudentName?`Đổi: ${esc(a.fromStudentName)} → ${esc(a.toStudentName)}`:`HS: ${esc(a.studentName||a.studentId||'')}`;
-    return `${from}${a.at?` • ${new Date(Number(a.at)).toLocaleString('vi-VN')}`:''}`;
+    const from=a.fromStudentName&&a.toStudentName&&a.fromStudentName!==a.toStudentName?`Đổi: ${esc(a.fromStudentName)} → ${esc(a.toStudentName)}`:(a.studentName||a.studentId)?`HS: ${esc(a.studentName||a.studentId)}${a.note?` — ${esc(a.note)}`:''}`:(a.note?esc(a.note):'');
+    return `${from}${from&&a.at?' • ':''}${a.at?new Date(Number(a.at)).toLocaleString('vi-VN'):''}`;
   };
   return `<div class="hero"><div class="eyebrow"><span class="pill soft">${esc(gvcnName)} · GVCN</span><span class="pill ${locked()?'green':'amber'}">${locked()?'✓ Tuần đã chốt':'● Tuần đang mở'}</span><span class="pill soft">Trung tâm điều khiển lớp</span></div><h1>Dashboard GVCN</h1><p>${esc(state.config?.className||'')} · ${esc(state.config?.schoolYear||'')} · Tuần ${esc(weekLabel(state.week))}</p><div class="actions no-print"><button class="btn light" data-action="week">📅 Đổi tuần</button><button class="btn dark" data-action="backup-json">⇩ Sao lưu JSON</button><button class="btn light" data-action="import-backup">⇧ Khôi phục JSON</button><button class="btn amber" data-action="review">✓ Kiểm tra & chốt</button></div></div>
 
@@ -316,22 +614,23 @@ function managePage(){
   </section>
 
   ${crossGradingCard()}
+  ${weedingManagersCard()}
   <div class="grid">
     <div class="card"><div class="cardhead"><div><div class="title">Cấu trúc lớp</div><div class="sub">Từng tổ · sĩ số · tổ trưởng · tổ phó</div></div><button class="btn small blue no-print" data-action="edit-structure">✎ Chỉnh cấu trúc</button><button class="btn small violet no-print" data-action="assign-officers">👥 Đổi chức vụ</button></div><div class="pad"><div class="list">${gs.map(g=>{const members=activeStudents.filter(s=>String(s.group)===String(g.id));return `<div class="accountcard"><div class="rank">${esc(g.id)}</div><div class="grow"><div class="fw">Tổ ${esc(g.name||g.id)} · ${members.length} HS</div><div class="tiny muted">Tổ trưởng: ${esc(g.leaderName||'Chưa phân công')} ${g.deputyName?`• Tổ phó: ${esc(g.deputyName)}`:'• Chưa có tổ phó'}</div></div><span class="statusbadge on">${members.length} HS</span></div>`}).join('')||'<div class="empty">Chưa có tổ.</div>'}</div></div></div>
 
-    <div class="card"><div class="cardhead"><div><div class="title">Cảnh báo</div><div class="sub">Những việc cần GVCN chú ý</div></div></div><div class="pad"><div class="list"><div class="item"><div class="itemrow"><span class="grade ${pendingRecords.length?'warn':'good'}">${pendingRecords.length?'CẦN XỬ LÝ':'ỔN'}</span><div class="grow"><div class="fw">Bản ghi chờ GVCN</div><div class="tiny muted">${pendingRecords.length} bản ghi trong tuần</div></div>${pendingRecords.length?`<button class="btn small amber" data-action="review">Xem</button>`:''}</div></div><div class="item"><div class="itemrow"><span class="grade ${newReports.length?'warn':'good'}">${newReports.length?'MỚI':'ỔN'}</span><div class="grow"><div class="fw">Phản ánh mới</div><div class="tiny muted">${newReports.length} phản ánh chưa xử lý</div></div>${newReports.length?`<button class="btn small light" data-tab="reports">Mở hộp thư</button>`:''}</div></div><div class="item"><div class="itemrow"><span class="grade ${locked()?'good':'ok'}">${locked()?'ĐÃ CHỐT':'ĐANG MỞ'}</span><div class="grow"><div class="fw">Trạng thái tuần</div><div class="tiny muted">${esc(weekLabel(state.week))}</div></div>${locked()?`<button class="btn small light" data-action="unfinalize">Mở lại</button>`:''}</div></div></div></div></div>
+    <div class="card"><div class="cardhead"><div><div class="title">Cảnh báo</div><div class="sub">Những việc cần GVCN chú ý</div></div></div><div class="pad"><div class="list"><div class="item"><div class="itemrow"><span class="grade ${pendingRecords.length?'warn':'good'}">${pendingRecords.length?'CẦN XỬ LÝ':'ỔN'}</span><div class="grow"><div class="fw">Bản ghi chờ GVCN</div><div class="tiny muted">${pendingRecords.length} bản ghi trong tuần</div></div>${pendingRecords.length?`<button class="btn small amber" data-action="review">Xem</button>`:''}</div></div><div class="item"><div class="itemrow"><span class="grade ${newReports.length?'warn':'good'}">${newReports.length?'MỚI':'ỔN'}</span><div class="grow"><div class="fw">Phản ánh mới</div><div class="tiny muted">${newReports.length} phản ánh chưa xử lý</div></div>${newReports.length?`<button class="btn small light" data-tab="reports">Mở hộp thư</button>`:''}</div></div><div class="item"><div class="itemrow"><span class="grade ${weedingCount?'warn':'good'}">${weedingCount?`${weedingCount} HS`:'TRỐNG'}</span><div class="grow"><div class="fw">Danh sách nhổ cỏ</div><div class="tiny muted">${weedingCount?`${weedingCount} thành viên đang lưu`:'Chưa có thành viên'}</div></div><button class="btn small light" data-tab="weeding">Xem danh sách</button></div></div><div class="item"><div class="itemrow"><span class="grade ${locked()?'good':'ok'}">${locked()?'ĐÃ CHỐT':'ĐANG MỞ'}</span><div class="grow"><div class="fw">Trạng thái tuần</div><div class="tiny muted">${esc(weekLabel(state.week))}</div></div>${locked()?`<button class="btn small light" data-action="unfinalize">Mở lại</button>`:''}</div></div></div></div></div>
   </div>
 
-  <div class="card" style="margin-top:14px"><div class="cardhead"><div><div class="title">Tài khoản & chức vụ</div><div class="sub">Các chức vụ hệ thống và chức vụ tùy chỉnh</div></div><div class="actions" style="margin:0"><button class="btn small violet no-print" data-action="manage-roles">⚙ Chức vụ</button><button class="btn small dark no-print" data-action="create-account">＋ Thêm tài khoản</button></div></div><div class="pad"><div class="three">${roleAccounts.map(([label,role])=>{const count=customRoleDefs().some(d=>d.id===role)?us.filter(u=>u.positionId===role).length:us.filter(u=>u.role===role).length;return `<div class="accountcard"><div class="grow"><div class="fw">${esc(label)}</div><div class="tiny muted">${count} tài khoản</div></div><span class="accountbadge">${count}</span></div>`}).join('')}</div><div class="list" style="margin-top:10px">${us.map(u=>`<div class="accountcard"><div class="avatar">${initials(u.name)}</div><div class="grow"><div class="fw">${esc(u.name)}</div><div class="tiny muted">${esc(userRoleLabel(u))}${u.group?` • Tổ ${esc(u.group)}`:''}</div></div><span class="accountbadge">${esc(u.username)}</span><span class="statusbadge ${u.active===false?'off':'on'}">${u.active===false?'Khóa':'Đang dùng'}</span>${u.username!=='GVCN'?`<button class="btn small light no-print" data-action="edit-account:${u.uid}">✎ Sửa</button><button class="btn small violet no-print" data-action="reset-password:${u.uid}">🔑 Mật khẩu</button><button class="btn small ${u.active===false?'green':'light'} no-print" data-action="toggle-user:${u.uid}">${u.active===false?'Mở':'Khóa'}</button><button class="btn small red no-print" data-action="delete-user:${u.uid}">🗑 Xóa</button>`:''}</div>`).join('')||'<div class="empty">Chưa có tài khoản.</div>'}</div></div></div>
+  <div class="card" style="margin-top:14px"><div class="cardhead"><div><div class="title">Tài khoản & chức vụ</div><div class="sub">Các chức vụ hệ thống và chức vụ tùy chỉnh</div></div><div class="actions" style="margin:0"><button class="btn small violet no-print" data-action="manage-roles">⚙ Chức vụ</button><button class="btn small dark no-print" data-action="create-account">＋ Thêm tài khoản</button></div></div><div class="pad"><div class="three">${roleAccounts.map(([label,role])=>{const count=customRoleDefs().some(d=>d.id===role)?us.filter(u=>u.positionId===role).length:us.filter(u=>u.role===role).length;return `<div class="accountcard"><div class="grow"><div class="fw">${esc(label)}</div><div class="tiny muted">${count} tài khoản</div></div><span class="accountbadge">${count}</span></div>`}).join('')}</div><div class="list" style="margin-top:10px">${us.map(u=>`<div class="accountcard"><div class="avatar">${initials(u.name)}</div><div class="grow"><div class="fw">${esc(u.name)}</div><div class="tiny muted">${esc(userRoleLabel(u))}${u.group?` • Tổ ${esc(u.group)}`:''}</div></div>${isWeedingManager(u.uid)?`<span class="grade good">🌿 QL nhổ cỏ</span>`:''}<span class="accountbadge">${esc(u.username)}</span><span class="statusbadge ${u.active===false?'off':'on'}">${u.active===false?'Khóa':'Đang dùng'}</span>${u.username!=='GVCN'?`<button class="btn small light no-print" data-action="edit-account:${u.uid}">✎ Sửa</button><button class="btn small violet no-print" data-action="reset-password:${u.uid}">🔑 Mật khẩu</button><button class="btn small ${u.active===false?'green':'light'} no-print" data-action="toggle-user:${u.uid}">${u.active===false?'Mở':'Khóa'}</button><button class="btn small red no-print" data-action="delete-user:${u.uid}">🗑 Xóa</button>`:''}</div>`).join('')||'<div class="empty">Chưa có tài khoản.</div>'}</div></div></div>
 
   <div class="grid" style="margin-top:14px"><div class="card"><div class="cardhead"><div><div class="title">Hoạt động gần đây</div><div class="sub">Bản ghi vừa cộng/trừ · người ghi · học sinh · mức điểm</div></div><button class="btn small light no-print" data-action="records">Xem toàn bộ</button></div><div class="pad"><div class="recordlist">${recent.length?recent.map(recordCard).join(''):'<div class="empty">Chưa có bản ghi trong tuần.</div>'}</div></div></div>
-    <div class="card"><div class="cardhead"><div><div class="title">Lịch sử chỉnh sửa</div><div class="sub">Sửa · xóa · hoàn tác và thời gian thực hiện</div></div></div><div class="pad"><div class="recordlist">${audits.map(a=>`<div class="accountcard"><div class="recicon ${a.action==='delete'?'minus':a.action==='undo-delete'?'plus':''}">${a.action==='delete'?'🗑':a.action==='undo-delete'?'↶':'✎'}</div><div class="grow"><div class="fw">${esc(auditLabel(a))} · ${esc(a.actorName||'Cán bộ')}</div><div class="tiny muted">${auditDetail(a)}${a.recordId?` • Mã: ${esc(a.recordId)}`:''}</div>${a.before&&a.after&&a.action==='edit'?`<div class="tiny muted" style="margin-top:3px">Trước: ${esc(a.before.kind||'')} ${Number(a.before.points)>0?'+':'−'}${Math.abs(Number(a.before.points||0))} → Sau: ${esc(a.after.kind||'')} ${Number(a.after.points)>0?'+':'−'}${Math.abs(Number(a.after.points||0))}</div>`:''}</div></div>`).join('')||'<div class="empty">Chưa có lịch sử chỉnh sửa.</div>'}</div></div></div>
+    <div class="card"><div class="cardhead"><div><div class="title">Lịch sử chỉnh sửa</div><div class="sub">Sửa · xóa · hoàn tác và thời gian thực hiện</div></div></div><div class="pad"><div class="recordlist">${audits.map(a=>`<div class="accountcard"><div class="recicon ${a.action==='delete'||a.action==='DELETE'||a.action==='WEEDING_REMOVE'?'minus':a.action==='undo-delete'||a.action==='RESTORE'||a.action==='WEEDING_ADD'||a.action==='WEEDING_RESTORE'?'plus':''}">${a.action==='delete'||a.action==='DELETE'||a.action==='WEEDING_REMOVE'?'🗑':a.action==='undo-delete'||a.action==='RESTORE'||a.action==='WEEDING_RESTORE'?'↶':a.action?.startsWith?.('WEEDING_')?'🌿':'✎'}</div><div class="grow"><div class="fw">${esc(auditLabel(a))} · ${esc(a.actorName||'Cán bộ')}</div><div class="tiny muted">${auditDetail(a)}${a.recordId?` • Mã: ${esc(a.recordId)}`:''}</div>${a.before&&a.after&&a.action==='edit'?`<div class="tiny muted" style="margin-top:3px">Trước: ${esc(a.before.kind||'')} ${Number(a.before.points)>0?'+':'−'}${Math.abs(Number(a.before.points||0))} → Sau: ${esc(a.after.kind||'')} ${Number(a.after.points)>0?'+':'−'}${Math.abs(Number(a.after.points||0))}</div>`:''}</div></div>`).join('')||'<div class="empty">Chưa có lịch sử chỉnh sửa.</div>'}</div></div></div>
   </div>
 
-  <div class="card" style="margin-top:14px"><div class="cardhead"><div><div class="title">Sao lưu dữ liệu</div><div class="sub">Xuất toàn bộ dữ liệu lớp thành JSON để lưu dự phòng</div></div><div class="actions" style="margin:0"><button class="btn small dark no-print" data-action="backup-json">⇩ Xuất JSON</button><button class="btn small light no-print" data-action="import-backup">⇧ Nhập JSON</button></div></div><div class="pad"><div class="notice">Bản sao lưu gồm cấu hình lớp, tổ, học sinh, tài khoản, bản ghi, phản ánh, tuần và lịch sử chỉnh sửa. Không chứa mật khẩu Firebase Authentication.</div></div></div>`;
+  <div class="card" style="margin-top:14px"><div class="cardhead"><div><div class="title">Sao lưu dữ liệu</div><div class="sub">Xuất toàn bộ dữ liệu lớp thành JSON để lưu dự phòng</div></div><div class="actions" style="margin:0"><button class="btn small dark no-print" data-action="backup-json">⇩ Xuất JSON</button><button class="btn small light no-print" data-action="import-backup">⇧ Nhập JSON</button></div></div><div class="pad"><div class="notice">Bản sao lưu gồm cấu hình lớp, tổ, học sinh, tài khoản, bản ghi, danh sách nhổ cỏ, phản ánh, tuần và lịch sử chỉnh sửa. Không chứa mật khẩu Firebase Authentication.</div></div></div>`;
 }
 function settingsPage(){return `<h2 class="page-title">Thiết lập</h2><p class="page-sub">Thông tin cơ bản và thao tác hệ thống.</p><div class="two"><div class="card"><div class="cardhead"><div class="title">Thông tin lớp</div></div><div class="pad"><div class="formgrid"><label class="field"><span class="label">Tên lớp</span><input id="cfg-class" class="input" value="${esc(state.config?.className||"")}"></label><label class="field"><span class="label">Năm học</span><input id="cfg-year" class="input" value="${esc(state.config?.schoolYear||"")}"></label></div><div class="actions"><button class="btn dark" data-action="save-config">Lưu</button></div></div></div><div class="card"><div class="cardhead"><div class="title">Tài khoản học sinh chung</div></div><div class="pad"><div class="notice">Tên đăng nhập: <strong>HOCSINH</strong>. Học sinh dùng chung một tài khoản và chỉ có quyền xem dữ liệu.</div><div class="actions"><button class="btn light" data-action="password">Đổi mật khẩu tài khoản đang đăng nhập</button></div></div></div></div>`}
-function renderApp(){let p=state.tab==="home"?dashboard():state.tab==="records"?recordsPage():state.tab==="students"?studentsPage():state.tab==="rules"?rulesPage():state.tab==="reports"?reportsPage():state.tab==="manage"?managePage():settingsPage();$("#root").innerHTML=shell(p);bind()}
+function renderApp(){let p=state.tab==="home"?dashboard():state.tab==="records"?recordsPage():state.tab==="students"?studentsPage():state.tab==="weeding"?weedingPage():state.tab==="rules"?rulesPage():state.tab==="reports"?reportsPage():state.tab==="manage"?managePage():settingsPage();$("#root").innerHTML=shell(p);bind()}
 function loginView(){const cfg=state.config;$("#root").innerHTML=`<div class="authbg"><div class="authcard"><div class="authgrid"><div class="authvisual"><div class="eyebrow"><span class="pill soft">THI ĐUA LỚP</span><span class="pill green">${esc(cfg?.schoolYear||"")}</span></div><h1>${esc(cfg?.className||"Lớp học")}</h1><p>Đăng nhập bằng <strong>tên tài khoản + mật khẩu</strong> do GVCN cấp. Không cần nhập email.</p><div class="featurelist"><div class="feature"><b>1</b><div><strong>Mỗi cán bộ một tài khoản riêng</strong><div class="tiny" style="color:#cbd5e1">Lớp trưởng, lớp phó, từng tổ trưởng/tổ phó.</div></div></div><div class="feature"><b>2</b><div><strong>Học sinh dùng một tài khoản chung</strong><div class="tiny" style="color:#cbd5e1">Chỉ xem bảng, tránh tạo quá nhiều tài khoản.</div></div></div><div class="feature"><b>3</b><div><strong>Phản ánh ẩn danh</strong><div class="tiny" style="color:#cbd5e1">Không cần đăng nhập.</div></div></div></div></div><div class="authform"><h2>Đăng nhập</h2><div class="subtext">${esc(cfg?.className||"")} · ${esc(cfg?.schoolYear||"")}</div><form id="login-form" style="margin-top:18px"><label class="field"><span class="label">Tên đăng nhập</span><input id="login-user" class="input" autocomplete="username" placeholder="Ví dụ: gvcn, loptruong, to1" required></label><label class="field" style="margin-top:10px"><span class="label">Mật khẩu</span><div class="passwrap"><input id="login-pass" class="input" type="password" autocomplete="current-password" required><button class="passbtn" type="button" data-action="toggle-password:login-pass" aria-label="Hiện hoặc ẩn mật khẩu">👁</button></div></label><div class="actions"><button class="btn dark full" type="submit">Đăng nhập</button></div></form><div class="sectionline"></div><button class="btn violet full" data-action="anonymous-report">📣 Gửi phản ánh ẩn danh</button><div class="notice" style="margin-top:12px">Tài khoản học sinh chung: <strong>HOCSINH</strong>. Vai trò chỉ quyết định quyền truy cập; mật khẩu được quản lý bởi Firebase Authentication phía sau.</div></div></div></div></div>`;bind()}
 function studentPicker(label, id, selectedId, students, emptyLabel="-- Chọn --", extraClass="", groupId=""){
   const chosen=String(selectedId||"");
@@ -393,7 +692,7 @@ function randomPass(){const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuv
 async function createAuthUser(username,password){const email=localAccountEmail(username,classKey());const app2=fb.appApi.initializeApp(FIREBASE_CONFIG,"create_"+slug(username)+"_"+Date.now());const auth2=fb.authApi.getAuth(app2),db2=fb.dbApi.getDatabase(app2);try{const cred=await fb.authApi.createUserWithEmailAndPassword(auth2,email,password);return{uid:cred.user.uid,auth:auth2,db:db2,email,app:app2}}catch(e){try{await fb.appApi.deleteApp(app2)}catch{}throw e}}
 async function finishSetup(){if(!fb.auth||!fb.db)return toast("Firebase chưa sẵn sàng. Hãy kiểm tra kết nối rồi thử lại.","err");const s=state.setup,parsed=parseRoster(s.studentsText),byId={};parsed.students.forEach(x=>byId[x.id]=x);if(!s.className||!s.gvcnPass||s.gvcnPass.length<6)return toast("Thiếu tên lớp hoặc mật khẩu GVCN.","err");if(!parsed.students.length)return toast("Chưa có danh sách học sinh.","err");if(!s.ltId)return toast("Hãy chọn lớp trưởng.","err");for(const g of s.groups){const c=s.groupLeaders[g.id]||{};if(!c.leaderId)return toast(`Tổ ${g.id} chưa có tổ trưởng.` ,"err")}s.classKey=slug(s.className)||"lop";const classConfig={className:s.className,schoolYear:s.schoolYear,classKey:s.classKey,createdAt:Date.now()};try{const gv=await createAuthUser("GVCN",s.gvcnPass);await fb.authApi.signInWithEmailAndPassword(fb.auth,localAccountEmail("GVCN",s.classKey),s.gvcnPass);if(!(await dbSet(`users/${gv.uid}`,{username:"GVCN",name:s.gvcnName||"GVCN",role:"gvcn",active:true,createdAt:Date.now()})))throw new Error("gvcn-profile-write-failed");const me=fb.auth.currentUser;state.user=me;state.profile={uid:me.uid,username:"GVCN",name:s.gvcnName||"GVCN",role:"gvcn",active:true};if(!(await dbSet(PATH.config,classConfig)))throw new Error("config-write-failed");const groups={};s.groups.forEach(g=>groups[g.id]={id:g.id,name:g.name||String(g.id),leaderName:byId[s.groupLeaders[g.id].leaderId]?.name||"",deputyName:byId[s.groupLeaders[g.id].deputyId||""]?.name||""});if(!(await dbSet(PATH.groups,groups)))throw new Error("groups-write-failed");const students={};parsed.students.forEach(x=>students[x.id]=x);if(!(await dbSet(PATH.students,students)))throw new Error("students-write-failed");const verification=await verifyStudents(students);if(!verification.ok)throw new Error(`students-count-mismatch:${verification.count}/${parsed.students.length}`);const accountPlans=[{username:"HOCSINH",password:s.studentPass||randomPass(),name:"Tài khoản học sinh",role:"student"},{username:"LOPTRUONG",password:s.ltPass||randomPass(),name:byId[s.ltId].name,role:"lopTruong"}];if(s.lpId)accountPlans.push({username:"LOPPHO",password:s.lpPass||randomPass(),name:byId[s.lpId].name,role:"lopPho"});s.groups.forEach(g=>{const c=s.groupLeaders[g.id]||{};if(c.leaderId)accountPlans.push({username:`TO${g.id}`,password:c.leaderPass||randomPass(),name:byId[c.leaderId].name,role:"toTruong",group:String(g.id)});if(c.deputyId)accountPlans.push({username:`TO${g.id}PHO`,password:c.deputyPass||randomPass(),name:byId[c.deputyId].name,role:"toPho",group:String(g.id)})});const created=[];for(const plan of accountPlans){const made=await createAuthUser(plan.username,plan.password);if(!(await dbSet(`users/${made.uid}`,{username:plan.username,name:plan.name,role:plan.role,group:plan.group||null,active:true,createdAt:Date.now()})))throw new Error(`user-profile-write-failed:${plan.username}`);created.push({...plan,uid:made.uid});try{await fb.appApi.deleteApp(made.app)}catch{}}await syncAll();state.accountSheet=created;await writeSystemAudit("CREATE","class",s.classKey,null,classConfig);openCredentials(created);renderApp()}catch(e){console.error(e);toast(e?.code?.includes("email-already-in-use")?"Một tài khoản đã tồn tại trong Firebase. Nếu đây là lần thử trước, hãy xóa tài khoản cũ rồi tạo lại lớp.":`Tạo lớp thất bại: ${e?.message||"lỗi không xác định"}`,"err")}}
 function openCredentials(list){openModal("Tài khoản đã tạo",`<div class="success">Lớp đã được tạo. Đây là danh sách tài khoản khởi tạo; hãy lưu lại trước khi đóng cửa sổ.</div><div class="tablewrap" style="margin-top:10px"><table class="tablemini"><thead><tr><th>Vai trò</th><th>Tài khoản</th><th>Mật khẩu</th></tr></thead><tbody>${list.map(x=>`<tr><td>${esc(roleLabel(x.role))}${x.group?` • Tổ ${esc(x.group)}`:""}</td><td class="cred">${esc(x.username)}</td><td class="cred">${esc(x.password)}</td></tr>`).join("")}</tbody></table></div><div class="warning" style="margin-top:10px">Sau khi bàn giao, mỗi cán bộ nên đổi mật khẩu. Tài khoản HOCSINH là tài khoản dùng chung, chỉ có quyền xem.</div><div class="actions" style="justify-content:flex-end"><button class="btn dark" data-action="close">Đóng</button></div>`)}
-function bind(){ $$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderApp()});$$('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));$('#search')?.addEventListener('input',e=>{state.search=e.target.value;renderApp();setTimeout(()=>{const n=$('#search');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length)}},0)});$('#group')?.addEventListener('change',e=>{state.group=e.target.value;renderApp()});$('#login-form')?.addEventListener('submit',doLogin)}
+function bind(){ $$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderApp()});$$('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));$('#search')?.addEventListener('input',e=>{state.search=e.target.value;renderApp();setTimeout(()=>{const n=$('#search');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length)}},0)});$('#group')?.addEventListener('change',e=>{state.group=e.target.value;renderApp()});$('#weeding-search')?.addEventListener('input',e=>{state.weedingSearch=e.target.value;renderApp();setTimeout(()=>{const n=$('#weeding-search');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length)}},0)});$('#weeding-group')?.addEventListener('change',e=>{state.weedingGroup=e.target.value;renderApp()});$$('.wm-card-cb').forEach(cb=>cb.addEventListener('change',()=>{cb.closest('.weeding-mgr-item')?.classList.toggle('is-selected',cb.checked)}));$('#login-form')?.addEventListener('submit',doLogin)}
 async function doLogin(e){e.preventDefault();const u=$('#login-user').value.trim().toUpperCase(),p=$('#login-pass').value;if(!fb.auth)return toast("Firebase Authentication chưa sẵn sàng.","err");try{const key=state.config?.classKey||slug(state.config?.className);const cred=await fb.authApi.signInWithEmailAndPassword(fb.auth,localAccountEmail(u,key),p);const prof=await dbGet(`users/${cred.user.uid}`);if(!prof?.exists())throw new Error("no-profile");const v=prof.val();if(v.active===false)throw new Error("locked");state.user=cred.user;state.profile={...v,uid:cred.user.uid};state.tab="home";await syncAll();renderApp();toast(`Xin chào ${v.name}!`,"ok")}catch(e){toast(e.message==="locked"?"Tài khoản đã bị khóa.":"Sai tên đăng nhập hoặc mật khẩu.","err")}}
 async function guestReportAuthlessSave(r){state.reports[r.id]=r;saveLocal()}
 function openModal(title,html){closeModal();const e=document.createElement("div");e.className="modalbg";e.id="modal";e.innerHTML=`<div class="modal"><div class="modalhead"><div class="modaltitle">${title}</div><button class="modalclose" data-action="close">×</button></div><div class="modalbody">${html}</div></div>`;document.body.appendChild(e);bindModal()}
@@ -481,6 +780,7 @@ function assignOfficers(){
       beforeUsers[user.uid]={...user};
       if(!(await dbSet(`users/${user.uid}`,next)))throw new Error(`Không cập nhật được ${label}`);
       state.users[user.uid]=next;
+      await syncWeedingManagerMeta(user.uid,next);
       updates.push(`${label}: ${user.name||"?"} → ${next.name||user.name||"?"}`);
     };
 
@@ -562,7 +862,9 @@ async function manageRoles(){
     const before=state.config,customRoles={...(state.config?.customRoles||{}),[roleId]:item},next={...state.config,customRoles};
     if(!(await dbSet(PATH.config,next)))return toast(firebaseErrMsg(existingId?"Không cập nhật được chức vụ.":"Không lưu được chức vụ lên Firebase."),"err");
     const verify=await dbGet(PATH.config);if(!verify.exists())return toast("Không xác minh được chức vụ sau khi lưu.","err");
-    state.config=verify.val()||next;saveLocal();await writeSystemAudit(existingId?"UPDATE":"CREATE","customRole",roleId,old,item);
+    state.config=verify.val()||next;saveLocal();
+    if(existingId){for(const u of Object.values(state.users||{})){if(u?.positionId===roleId)await syncWeedingManagerMeta(u.uid,u)}}
+    await writeSystemAudit(existingId?"UPDATE":"CREATE","customRole",roleId,old,item);
     if(existingId){closeModal();renderApp();toast(`Đã cập nhật chức vụ “${name}”.` ,"ok");}
     else{ $('#custom-role-list').innerHTML=renderList();bind();toast(`Đã thêm chức vụ “${name}” với quyền ${permissionSummary(item)}.` ,"ok");resetForm();}
   };
@@ -615,6 +917,7 @@ async function deleteUser(uid){
     if(!response.ok)throw new Error(`${response.status}: ${data?.error||"API không xác định"}`);
     const snapshot={...target};
     delete state.users[uid];
+    try{await syncWeedingManagerMeta(uid,null)}catch(wErr){console.warn("syncWeedingManagerMeta delete failed",wErr)}
     try{await writeSystemAudit("DELETE_USER","user",uid,snapshot,null)}catch(auditErr){console.warn("DELETE_USER audit failed",auditErr)}
     renderApp();toast(`Đã xóa tài khoản ${username}.`,"ok");
   }catch(err){
@@ -693,8 +996,8 @@ function importBackupJson(){
     try{
       const parsed=JSON.parse(await file.text()),valid=validateBackupShape(parsed); if(!valid.ok)throw new Error(valid.reason); if(parsed.classConfig?.classKey&&state.config?.classKey&&String(parsed.classConfig.classKey)!==String(state.config.classKey))throw new Error(`Tệp sao lưu thuộc lớp khác (${parsed.classConfig.className||parsed.classConfig.classKey}).`);
       const activeStudents=Object.values(parsed.students||{}).filter(s=>s&&s.active!==false);
-      const counts={students:Object.keys(parsed.students||{}).length,activeStudents:activeStudents.length,groups:Object.keys(parsed.groups||{}).length,users:Object.keys(parsed.users||{}).length,records:Object.keys(parsed.records||{}).length,audit:Object.keys(parsed.audit||{}).length,reports:Object.keys(parsed.reports||{}).length,weeks:Object.keys(parsed.weeks||{}).length};
-      openModal("Xác nhận khôi phục JSON",`<div class="warning"><strong>Cảnh báo:</strong> thao tác này sẽ ghi đè dữ liệu lớp hiện tại bằng dữ liệu trong tệp. Không thể hoàn tác tự động nếu tệp sai.</div><div class="sectionline"></div><div class="three"><div class="stat"><div class="stat-label">Học sinh</div><div class="stat-value">${counts.students}</div><div class="stat-sub">${counts.activeStudents} đang học</div></div><div class="stat"><div class="stat-label">Tổ</div><div class="stat-value">${counts.groups}</div><div class="stat-sub">cấu trúc lớp</div></div><div class="stat"><div class="stat-label">Tài khoản</div><div class="stat-value">${counts.users}</div><div class="stat-sub">hồ sơ</div></div></div><div class="notice" style="margin-top:10px">Bản sao lưu không khôi phục mật khẩu Firebase Authentication. Hồ sơ tài khoản được khôi phục, còn mật khẩu vẫn giữ theo Firebase.</div><div class="actions" style="justify-content:flex-end"><button class="btn light" data-action="close">Hủy</button><button class="btn red" id="confirm-import-backup">Khôi phục dữ liệu</button></div>`);
+      const counts={students:Object.keys(parsed.students||{}).length,activeStudents:activeStudents.length,groups:Object.keys(parsed.groups||{}).length,users:Object.keys(parsed.users||{}).length,records:Object.keys(parsed.records||{}).length,audit:Object.keys(parsed.audit||{}).length,reports:Object.keys(parsed.reports||{}).length,weeks:Object.keys(parsed.weeks||{}).length,weeding:Object.keys(parsed.weeding?.items||{}).length};
+      openModal("Xác nhận khôi phục JSON",`<div class="warning"><strong>Cảnh báo:</strong> thao tác này sẽ ghi đè dữ liệu lớp hiện tại bằng dữ liệu trong tệp. Không thể hoàn tác tự động nếu tệp sai.</div><div class="sectionline"></div><div class="three"><div class="stat"><div class="stat-label">Học sinh</div><div class="stat-value">${counts.students}</div><div class="stat-sub">${counts.activeStudents} đang học</div></div><div class="stat"><div class="stat-label">Tổ</div><div class="stat-value">${counts.groups}</div><div class="stat-sub">cấu trúc lớp</div></div><div class="stat"><div class="stat-label">Tài khoản</div><div class="stat-value">${counts.users}</div><div class="stat-sub">${counts.weeding} HS nhổ cỏ</div></div></div><div class="notice" style="margin-top:10px">Bản sao lưu không khôi phục mật khẩu Firebase Authentication. Hồ sơ tài khoản được khôi phục, còn mật khẩu vẫn giữ theo Firebase.</div><div class="actions" style="justify-content:flex-end"><button class="btn light" data-action="close">Hủy</button><button class="btn red" id="confirm-import-backup">Khôi phục dữ liệu</button></div>`);
       $('#confirm-import-backup').onclick=async()=>{
         const btn=$('#confirm-import-backup'); if(btn){btn.disabled=true;btn.textContent='Đang khôi phục...'}
         const currentUid=state.user?.uid,currentProfile=state.profile?{...state.profile}:null;
@@ -704,6 +1007,12 @@ function importBackupJson(){
           const importedUsers={...parsed.users};
           if(currentUid&&currentProfile)importedUsers[currentUid]=currentProfile;
           if(!(await dbSet(PATH.users,importedUsers)))throw new Error('Không ghi được users.');
+          if(parsed.weeding&&typeof parsed.weeding==="object"){
+            const wm=Object.fromEntries(Object.entries(parsed.weeding.managers||{}).filter(([uid,m])=>m&&importedUsers[uid]));
+            const wi=Object.fromEntries(Object.entries(parsed.weeding.items||{}).filter(([,it])=>it&&parsed.students?.[it.studentId]));
+            if(!(await dbSet(`${PATH.weeding}/managers`,Object.keys(wm).length?wm:null)))throw new Error('Không ghi được weeding/managers.');
+            if(!(await dbSet(`${PATH.weeding}/items`,Object.keys(wi).length?wi:null)))throw new Error('Không ghi được weeding/items.');
+          }
           const v=await verifyStudents(activeStudents.reduce((o,x)=>(o[x.id]=x,o),{}));
           if(!v.ok)throw new Error(`Xác minh học sinh thất bại: ${v.count}/${activeStudents.length}.`);
           if(!(await dbSet(PATH.audit,parsed.audit||{})))throw new Error('Không ghi được audit.');
@@ -718,7 +1027,7 @@ function importBackupJson(){
 async function exportBackupJson(){
   if(!isGvcn())return toast("Chỉ GVCN được xuất bản sao lưu.","err");
   const payload={
-    schemaVersion:2,
+    schemaVersion:3,
     exportedAt:Date.now(),
     exportedBy:{uid:state.user?.uid||null,name:state.profile?.name||"GVCN"},
     classConfig:state.config||null,
@@ -728,6 +1037,7 @@ async function exportBackupJson(){
     records:state.records||{},
     reports:state.reports||{},
     weeks:state.weeks||{},
+    weeding:state.weeding||{managers:{},items:{}},
     audit:state.audit||{}
   };
   const name=slug(state.config?.className||"lop")||"lop";
@@ -739,11 +1049,11 @@ function csvFromRows(data){return "\ufeff"+data.map(r=>r.map(v=>`"${String(v??""
 function download(text,name,type){const b=new Blob([text],{type}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),400)}
 function exportCsv(){const d=[["STT","Mã HS","Họ tên","Tổ","Cộng","Trừ","Điểm","Xếp loại"],...visibleRows().map((r,i)=>[i+1,r.st.id,r.st.name,r.st.group,r.plus,r.minus,r.score,grade(r.score)[0]])];download(csvFromRows(d),`thi-dua-${state.config.className}-${state.week}.csv`,`text/csv;charset=utf-8`)}
 function exportStudents(){const d=[["Mã học sinh","Họ và tên","Tổ"],...Object.values(state.students).sort(compareStudentsByGroup).map(s=>[s.id,s.name,s.group])];download(csvFromRows(d),`danh-sach-${state.config.className}.csv`,`text/csv;charset=utf-8`)}
-async function action(a){if(a==="anonymous-report")return anonymousReport();if(a==="retry-sync")return syncAll().then(ok=>{if(!ok)return toast("Chưa thể đồng bộ Firebase.","err");renderApp();toast("Đã đồng bộ lại.","ok")});if(a==="logout"){stopRealtimeSync();try{await fb.authApi.signOut(fb.auth)}catch{}state.user=null;state.profile=null;return loginView()}if(a==="password")return passwordModal();if(a==="plus")return recordModal("plus");if(a==="minus")return recordModal("minus");if(a==="week")return changeWeek();if(a==="records") {state.tab="records";return renderApp();}if(a==="review")return reviewWeek();if(a==="finalize")return finalizeWeek();if(a==="unfinalize")return unfinalize();if(a==="backup-json")return exportBackupJson();if(a==="import-backup")return importBackupJson();if(a==="csv")return exportCsv();if(a==="csv-students")return exportStudents();if(a==="print")return window.print();if(a==="detail")return; if(a.startsWith("detail:"))return detail(a.slice(7));if(a.startsWith("edit-record:"))return editRecord(a.slice(12));if(a.startsWith("delete-record:"))return deleteRecord(a.slice(14));if(a.startsWith("approve:"))return reviewRecord(a.slice(8),"approved");if(a.startsWith("reject:"))return reviewRecord(a.slice(7),"rejected");if(a.startsWith("handle-report:"))return handleReport(a.slice(14));if(a.startsWith("toggle-user:"))return toggleUser(a.slice(12));if(a.startsWith("delete-user:"))return deleteUser(a.slice(12));if(a.startsWith("reset-password:"))return resetAccountPassword(a.slice(15));if(a.startsWith("edit-account:"))return accountForm(a.slice(13));if(a==="create-account")return accountForm();if(a.startsWith("report-record:"))return reportToRecord(a.slice(14));if(a==="edit-roster")return editRoster();if(a==="save-roster")return saveRoster();if(a==="edit-structure")return editStructure();if(a==="assign-officers")return assignOfficers();if(a==="manage-roles")return manageRoles();if(a.startsWith("edit-custom-role:"))return editCustomRole(a.slice(17));if(a.startsWith("delete-custom-role:"))return deleteCustomRole(a.slice(19));if(a==="save-config")return saveConfig();if(a==="save-cross")return saveCrossGrading();if(a==="cross-rotate")return crossRotate();if(a==="sample-roster"){state.setup.studentsText=sampleRoster();return setupView()}if(a==="setup-prev"){state.setupStep--;return setupView()}if(a==="setup-next")return setupNext();if(a==="close")return closeModal();if(a.startsWith("toggle-password:")){const idv=a.slice(16),el=document.getElementById(idv);if(!el)return;el.type=el.type==="password"?"text":"password";const btn=el.parentElement?.querySelector(".passbtn");if(btn)btn.textContent=el.type==="password"?"👁":"🙈";return}}
+async function action(a){if(a==="anonymous-report")return anonymousReport();if(a==="retry-sync")return syncAll().then(ok=>{if(!ok)return toast("Chưa thể đồng bộ Firebase.","err");renderApp();toast("Đã đồng bộ lại.","ok")});if(a==="logout"){stopRealtimeSync();try{await fb.authApi.signOut(fb.auth)}catch{}state.user=null;state.profile=null;state.weeding={managers:{},items:{}};state.weedingError=null;return loginView()}if(a==="password")return passwordModal();if(a==="plus")return recordModal("plus");if(a==="minus")return recordModal("minus");if(a==="week")return changeWeek();if(a==="records") {state.tab="records";return renderApp();}if(a==="open-weeding"){state.tab="weeding";return renderApp();}if(a==="weeding-add")return weedingAddModal();if(a==="weeding-managers")return weedingManagersModal();if(a==="save-weeding-managers")return saveWeedingManagers($$('.wm-card-cb:checked').map(cb=>cb.value),false);if(a==="weeding-clear-all")return weedingClearAll();if(a==="csv-weeding")return exportWeedingCsv();if(a.startsWith("weeding-edit:"))return weedingEditModal(a.slice(13));if(a.startsWith("weeding-remove:"))return weedingRemove(a.slice(15));if(a==="review")return reviewWeek();if(a==="finalize")return finalizeWeek();if(a==="unfinalize")return unfinalize();if(a==="backup-json")return exportBackupJson();if(a==="import-backup")return importBackupJson();if(a==="csv")return exportCsv();if(a==="csv-students")return exportStudents();if(a==="print")return window.print();if(a==="detail")return; if(a.startsWith("detail:"))return detail(a.slice(7));if(a.startsWith("edit-record:"))return editRecord(a.slice(12));if(a.startsWith("delete-record:"))return deleteRecord(a.slice(14));if(a.startsWith("approve:"))return reviewRecord(a.slice(8),"approved");if(a.startsWith("reject:"))return reviewRecord(a.slice(7),"rejected");if(a.startsWith("handle-report:"))return handleReport(a.slice(14));if(a.startsWith("toggle-user:"))return toggleUser(a.slice(12));if(a.startsWith("delete-user:"))return deleteUser(a.slice(12));if(a.startsWith("reset-password:"))return resetAccountPassword(a.slice(15));if(a.startsWith("edit-account:"))return accountForm(a.slice(13));if(a==="create-account")return accountForm();if(a.startsWith("report-record:"))return reportToRecord(a.slice(14));if(a==="edit-roster")return editRoster();if(a==="save-roster")return saveRoster();if(a==="edit-structure")return editStructure();if(a==="assign-officers")return assignOfficers();if(a==="manage-roles")return manageRoles();if(a.startsWith("edit-custom-role:"))return editCustomRole(a.slice(17));if(a.startsWith("delete-custom-role:"))return deleteCustomRole(a.slice(19));if(a==="save-config")return saveConfig();if(a==="save-cross")return saveCrossGrading();if(a==="cross-rotate")return crossRotate();if(a==="sample-roster"){state.setup.studentsText=sampleRoster();return setupView()}if(a==="setup-prev"){state.setupStep--;return setupView()}if(a==="setup-next")return setupNext();if(a==="close")return closeModal();if(a.startsWith("toggle-password:")){const idv=a.slice(16),el=document.getElementById(idv);if(!el)return;el.type=el.type==="password"?"text":"password";const btn=el.parentElement?.querySelector(".passbtn");if(btn)btn.textContent=el.type==="password"?"👁":"🙈";return}}
 function sampleRoster(){return Array.from({length:30},(_,i)=>`A${String(i+1).padStart(2,"0")}\tHọc sinh ${i+1}\t${(i%4)+1}`).join("\n")}
 function collectSetupStep(){const s=state.setup,step=state.setupStep;if(step===1){s.className=$('#s-class').value.trim();s.schoolYear=$('#s-year').value.trim()||"2026–2027";s.gvcnName=$('#s-gname').value.trim()||"GVCN";s.groupCount=Math.max(1,Math.min(15,Number($('#s-count').value)||4));s.gvcnPass=$('#s-gpass').value; if(s.gvcnPass.length<6)return false;s.groups=Array.from({length:s.groupCount},(_,i)=>s.groups[i]||{id:i+1,name:String(i+1)});return true}if(step===2){s.studentsText=$('#s-roster').value;return parseRoster(s.studentsText).students.length>0}if(step===3){s.ltId=$('#s-lt').value;s.lpId=$('#s-lp').value;s.studentPass=$('#s-stpass').value;s.ltPass=$('#s-lt-pass').value.trim();s.lpPass=$('#s-lp-pass').value.trim();if(s.studentPass.length<6||s.ltPass.length<6||(s.lpId&&s.lpPass.length<6))return false;s.groupLeaders={};$$('.s-gl').forEach(el=>{const g=el.dataset.g;s.groupLeaders[g]={...(s.groupLeaders[g]||{}),leaderId:el.value}});$$('.s-gd').forEach(el=>{const g=el.dataset.g;s.groupLeaders[g]={...(s.groupLeaders[g]||{}),deputyId:el.value}});$$('.s-gl-pass').forEach(el=>{const g=el.dataset.g;s.groupLeaders[g]={...(s.groupLeaders[g]||{}),leaderPass:el.value.trim()}});$$('.s-gd-pass').forEach(el=>{const g=el.dataset.g;s.groupLeaders[g]={...(s.groupLeaders[g]||{}),deputyPass:el.value.trim()}});for(const g of s.groups){if(!s.groupLeaders[g.id]?.leaderId||String(s.groupLeaders[g.id]?.leaderPass||'').length<6)return false;if(s.groupLeaders[g.id]?.deputyId&&String(s.groupLeaders[g.id]?.deputyPass||'').length<6)return false}const used=[s.ltId,s.lpId,...Object.values(s.groupLeaders).flatMap(x=>[x.leaderId,x.deputyId]).filter(Boolean)];const dup=used.filter((x,i)=>used.indexOf(x)!==i);if(dup.length)return false;return true}return true}
 async function setupNext(){if(!collectSetupStep())return toast(state.setupStep===3?"Kiểm tra phân công: mỗi tổ cần tổ trưởng, không trùng người, và tài khoản HOCSINH cần mật khẩu. ":"Hãy nhập đủ thông tin.","err");if(state.setupStep<4){state.setupStep++;setupView()}else finishSetup()}
-async function initFirebase(){try{const appApi=await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js");const authApi=await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js");const dbApi=await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js");const app=appApi.initializeApp(FIREBASE_CONFIG),auth=authApi.getAuth(app),db=dbApi.getDatabase(app);fb={app,auth,db,authApi,dbApi,appApi};state.fbReady=true;let cfg;try{cfg=await dbGetWithTimeout(PATH.config)}catch(e){state.fbReady=false;state.syncError=e;throw new Error(e?.code==="PERMISSION_DENIED"?"Firebase Rules từ chối quyền đọc cấu hình lớp.":e?.message==="firebase-timeout"?"Hết thời gian chờ kết nối Firebase.":"Không thể đọc cấu hình Firebase.")}if(cfg?.exists()){state.config=cfg.val();authApi.onAuthStateChanged(auth,async user=>{try{if(!user){stopRealtimeSync();state.user=null;state.profile=null;state.users={};return loginView()}const p=await dbGet(`users/${user.uid}`);if(!p?.exists()){await authApi.signOut(auth);return loginView()}const v=p.val();if(v.active===false){await authApi.signOut(auth);toast("Tài khoản đã bị khóa.","err");return loginView()}state.user=user;state.profile={...v,uid:user.uid};state.tab="home";await syncAll();renderApp()}catch(e){console.warn(e);state.syncError=e;toast(e?.message||"Không tải được hồ sơ tài khoản.","err")}})}else setupView()}catch(e){console.warn(e);state.fbReady=false;state.syncError=e;showFirebaseError(e?.message||"Không thể kết nối Firebase.")}}
+async function initFirebase(){try{const appApi=await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js");const authApi=await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js");const dbApi=await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js");const app=appApi.initializeApp(FIREBASE_CONFIG),auth=authApi.getAuth(app),db=dbApi.getDatabase(app);fb={app,auth,db,authApi,dbApi,appApi};state.fbReady=true;let cfg;try{cfg=await dbGetWithTimeout(PATH.config)}catch(e){state.fbReady=false;state.syncError=e;throw new Error(e?.code==="PERMISSION_DENIED"?"Firebase Rules từ chối quyền đọc cấu hình lớp.":e?.message==="firebase-timeout"?"Hết thời gian chờ kết nối Firebase.":"Không thể đọc cấu hình Firebase.")}if(cfg?.exists()){state.config=cfg.val();authApi.onAuthStateChanged(auth,async user=>{try{if(!user){stopRealtimeSync();state.user=null;state.profile=null;state.users={};state.weeding={managers:{},items:{}};state.weedingError=null;return loginView()}const p=await dbGet(`users/${user.uid}`);if(!p?.exists()){await authApi.signOut(auth);return loginView()}const v=p.val();if(v.active===false){await authApi.signOut(auth);toast("Tài khoản đã bị khóa.","err");return loginView()}state.user=user;state.profile={...v,uid:user.uid};state.tab="home";await syncAll();renderApp()}catch(e){console.warn(e);state.syncError=e;toast(e?.message||"Không tải được hồ sơ tài khoản.","err")}})}else setupView()}catch(e){console.warn(e);state.fbReady=false;state.syncError=e;showFirebaseError(e?.message||"Không thể kết nối Firebase.")}}
 window.__scriptsLoaded=true;
 function boot(){
   try{

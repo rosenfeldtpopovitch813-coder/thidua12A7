@@ -38,8 +38,26 @@
     "audit": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
       "$aid": {
-        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && !data.exists() && newData.exists() && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || ((root.child('users').child(auth.uid).child('positionId').exists() == false) && (root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho')) || (root.child('users').child(auth.uid).child('positionId').exists() && (root.child('classConfig').child('customRoles').child(root.child('users').child(auth.uid).child('positionId').val()).child('permissions').child('plus').val() == true || root.child('classConfig').child('customRoles').child(root.child('users').child(auth.uid).child('positionId').val()).child('permissions').child('minus').val() == true))) && newData.child('actorUid').val() == auth.uid && newData.child('id').val() == $aid",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && !data.exists() && newData.exists() && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || root.child('weeding').child('managers').child(auth.uid).child('active').val() == true || ((root.child('users').child(auth.uid).child('positionId').exists() == false) && (root.child('users').child(auth.uid).child('role').val() == 'lopTruong' || root.child('users').child(auth.uid).child('role').val() == 'lopPho' || root.child('users').child(auth.uid).child('role').val() == 'toTruong' || root.child('users').child(auth.uid).child('role').val() == 'toPho')) || (root.child('users').child(auth.uid).child('positionId').exists() && (root.child('classConfig').child('customRoles').child(root.child('users').child(auth.uid).child('positionId').val()).child('permissions').child('plus').val() == true || root.child('classConfig').child('customRoles').child(root.child('users').child(auth.uid).child('positionId').val()).child('permissions').child('minus').val() == true))) && newData.child('actorUid').val() == auth.uid && newData.child('id').val() == $aid",
         ".validate": "newData.hasChildren(['id','action','actorUid','at']) && newData.child('at').isNumber()"
+      }
+    },
+    "weeding": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+      "managers": {
+        ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
+        "$uid": {
+          ".validate": "!newData.exists() || (newData.hasChildren(['uid','active','assignedAt']) && newData.child('uid').val() == $uid && newData.child('active').isBoolean() && newData.child('assignedAt').isNumber() && root.child('users').child($uid).exists())"
+        }
+      },
+      "items": {
+        ".read": "auth != null && root.child('users').child(auth.uid).child('active').val() != false",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'gvcn' && root.child('users').child(auth.uid).child('active').val() != false",
+        "$wid": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('active').val() != false && (root.child('users').child(auth.uid).child('role').val() == 'gvcn' || root.child('weeding').child('managers').child(auth.uid).child('active').val() == true)",
+          ".validate": "!newData.exists() || (newData.hasChildren(['id','studentId','studentName','studentGroup','addedByUid','addedAt']) && newData.child('id').val() == $wid && root.child('students').child(newData.child('studentId').val()).exists() && newData.child('addedAt').isNumber() && (data.exists() || newData.child('addedByUid').val() == auth.uid || root.child('users').child(auth.uid).child('role').val() == 'gvcn'))"
+        }
       }
     },
     "reports": {
